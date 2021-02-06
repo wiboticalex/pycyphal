@@ -19,7 +19,7 @@ This module is not imported automatically because:
 >>> import pyuavcan
 >>> pyuavcan.transport   # Works.
 <module ...>
->>> pyuavcan.application
+>>> pyuavcan.application  # doctest: +SKIP
 Traceback (most recent call last):
     ...
 AttributeError: module 'pyuavcan' has no attribute 'application'
