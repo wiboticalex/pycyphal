@@ -88,7 +88,11 @@ def test(session):
         env = {
             "PYTHONASYNCIODEBUG": "1",
         }
-        session.run("coverage", "run", "-m", "pytest", *map(str, src_dirs), *session.posargs, env=env)
+        pytest = partial(session.run, "coverage", "run", "-m", "pytest", *session.posargs, env=env)
+        # Application-layer tests are run separately after the main test suite because they require DSDL for
+        # "uavcan" to be transpiled first. That namespace is transpiled as a side-effect of running the main suite.
+        pytest("--ignore=pyuavcan/application", *map(str, src_dirs))
+        pytest("pyuavcan/application")
     finally:
         broker_process.kill()
 
