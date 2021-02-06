@@ -81,6 +81,7 @@ def test(session):
 
     # Run the test suite (takes about 10-30 minutes per virtualenv).
     try:
+        compiled_dir = Path.cwd().resolve() / ".compiled"
         src_dirs = [
             ROOT_DIR / "pyuavcan",
             ROOT_DIR / "tests",
@@ -88,6 +89,7 @@ def test(session):
         postponed = ROOT_DIR / "pyuavcan" / "application"
         env = {
             "PYTHONASYNCIODEBUG": "1",
+            "PYTHONPATH": str(compiled_dir),
         }
         pytest = partial(session.run, "coverage", "run", "-m", "pytest", *session.posargs, env=env)
         # Application-layer tests are run separately after the main test suite because they require DSDL for
@@ -114,8 +116,8 @@ def test(session):
         "mypy   == 0.790",
         "pylint == 2.6.0",
     )
-    session.run("mypy", "--strict", *map(str, src_dirs), ".compiled")
-    session.run("pylint", *map(str, src_dirs), env={"PYTHONPATH": ".compiled"})
+    session.run("mypy", "--strict", *map(str, src_dirs), str(compiled_dir))
+    session.run("pylint", *map(str, src_dirs), env={"PYTHONPATH": str(compiled_dir)})
 
     # Publish coverage statistics. This also has to be run from the test session to access the coverage files.
     if sys.platform.startswith("linux") and is_latest_python(session) and session.env.get("COVERALLS_REPO_TOKEN"):

@@ -45,7 +45,8 @@ def generate_packages() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
     Nunavut are outside of the scope of responsibilities of this test suite, yet generation takes a long time.
     To force regeneration, remove the generated package directories.
     """
-    sys.path.insert(0, str(DESTINATION_DIR))
+    if str(DESTINATION_DIR) not in sys.path:  # pragma: no cover
+        sys.path.insert(0, str(DESTINATION_DIR))
     importlib.invalidate_caches()
     cache_file = DESTINATION_DIR / _CACHE_FILE_NAME
 
