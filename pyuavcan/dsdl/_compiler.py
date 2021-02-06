@@ -278,7 +278,7 @@ def _numpy_scalar_type(t: pydsdl.Any) -> str:
         raise ValueError(f"Invalid bit width: {w}")  # pragma: no cover
 
     if isinstance(t, pydsdl.BooleanType):
-        return f"_np_.bool"
+        return "bool"  # numpy.bool is deprecated in v1.20
     if isinstance(t, pydsdl.SignedIntegerType):
         return f"_np_.int{pick_width(t.bit_length)}"
     if isinstance(t, pydsdl.UnsignedIntegerType):
