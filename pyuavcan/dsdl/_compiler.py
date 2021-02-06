@@ -286,4 +286,4 @@ def _numpy_scalar_type(t: pydsdl.Any) -> str:
     if isinstance(t, pydsdl.FloatType):
         return f"_np_.float{pick_width(t.bit_length)}"
     assert not isinstance(t, pydsdl.PrimitiveType), "Forgot to handle some primitive types"
-    return f"_np_.object_"
+    return "object"  # numpy.object is deprecated in v1.20

@@ -332,7 +332,7 @@ class Deserializer(abc.ABC):
 
 class _LittleEndianDeserializer(Deserializer):
     def fetch_aligned_array_of_standard_bit_length_primitives(self, dtype: _PrimitiveType, count: int) -> numpy.ndarray:
-        assert dtype not in (bool, numpy.bool_, numpy.object), "Invalid usage"
+        assert dtype not in (bool, numpy.bool_, object), "Invalid usage"
         assert self._bit_offset % 8 == 0
         bo = self._byte_offset
         # Interestingly, numpy doesn't care about alignment. If the source buffer is not properly aligned, it will
@@ -347,7 +347,7 @@ class _LittleEndianDeserializer(Deserializer):
     def fetch_unaligned_array_of_standard_bit_length_primitives(
         self, dtype: _PrimitiveType, count: int
     ) -> numpy.ndarray:
-        assert dtype not in (bool, numpy.bool_, numpy.object), "Invalid usage"
+        assert dtype not in (bool, numpy.bool_, object), "Invalid usage"
         bs = self.fetch_unaligned_bytes(numpy.dtype(dtype).itemsize * count)
         assert len(bs) >= count
         return numpy.frombuffer(bs, dtype=dtype, count=count)

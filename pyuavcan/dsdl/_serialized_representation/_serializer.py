@@ -293,13 +293,13 @@ class _LittleEndianSerializer(Serializer):
         # We assume that the local platform uses IEEE 754-compliant floating point representation; otherwise,
         # the generated serialized representation may be incorrect. NumPy seems to only support IEEE-754 compliant
         # platforms though so I don't expect any compatibility issues.
-        assert x.dtype not in (bool, numpy.bool_, numpy.object)
+        assert x.dtype not in (bool, numpy.bool_, object)
         self.add_aligned_bytes(x.view(_Byte))
 
     def add_unaligned_array_of_standard_bit_length_primitives(self, x: numpy.ndarray) -> None:
         # This is much slower than the aligned version because we have to manually copy and shift each byte,
         # but still better than manual elementwise serialization.
-        assert x.dtype not in (bool, numpy.bool_, numpy.object)
+        assert x.dtype not in (bool, numpy.bool_, object)
         self.add_unaligned_bytes(x.view(_Byte))
 
 
