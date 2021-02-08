@@ -48,16 +48,110 @@ class Repository:
     The register repository is the main access point for the application to its registers.
     It is a facade that provides user-friendly API on top of multiple underlying register backends
     (see :class:`backend.Backend`).
+
+    API basics:
+
+    >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
+    >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
+    >>> b0 = SQLiteBackend()
+    >>> b0.set("c", Value())
+    >>> b0.set("a", Value())
+    >>> b1 = DynamicBackend()
+    >>> b1.register("b", lambda: Value())
+    >>> r = Repository(b0, b1)
+    >>> r.keys()  # Sorted lexicographically per backend.
+    ['a', 'c', 'b']
+    >>> Repository(b1, b0).keys()  # Notice how the order is affected.
+    ['b', 'a', 'c']
+    >>> r.get_name_at_index(0), r.get_name_at_index(1), r.get_name_at_index(2), r.get_name_at_index(3)
+    ('a', 'c', 'b', None)
+    >>> list(r)     # The repository keys are iterable.
+    ['a', 'c', 'b']
+    >>> len(r)      # The number of registers.
+    3
+
+    Get/set behaviors:
+
+    >>> from uavcan.primitive.array import Bit_1_0
+    >>> r.get("foo") is None            # No such register --> None.
+    True
+    >>> r["foo"]                        # This is an alternative. # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+    ...
+    MissingRegisterError: 'baz'
+    >>> r.set("foo", True)              # No such register --> exception. # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+    ...
+    MissingRegisterError: 'foo'
+    >>> b0.set("foo", Value(bit=Bit_1_0([True, False])))    # Create register "foo" in SQL backend.
+    >>> e = r.get("foo")                                    # Now it is gettable.
+    >>> e.bools    # Use the proxy properties to automatically convert the register value to a native type.
+    [True, False]
+    >>> e.ints
+    [1, 0]
+    >>> e.floats
+    [1.0, 0.0]
+    >>> e.value.bit.value[0], e.value.bit.value[1]  # Or just access the underlying DSDL value directly.
+    (True, False)
+    >>> r["foo"].ints                               # The alternative way that mimics dict.
+    [1, 0]
+    >>> r.set("foo", [True, False, False])  # Wrong dimensionality (3 items, not 2). # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+    ...
+    ValueConversionError: ...
+    >>> my_dynamic_register = Value(bit=Bit_1_0([True, False, False]))
+    >>> def set_my_dynamic_register(v: Value):
+    ...     global my_dynamic_register
+    ...     my_dynamic_register = v
+    >>> b1.register("bar", lambda: my_dynamic_register, set_my_dynamic_register)
+    >>> b1.register("bar.ro", lambda: my_dynamic_register)  # Read-only register.
+    >>> r.get("bar").bools
+    [True, False, False]
+    >>> r.set("bar", [0, 1.5, -5])     # The value type is converted automatically.
+    >>> r["bar"].floats
+    [0.0, 1.0, 1.0]
+
+    Access method implements the logic of ``uavcan.register.Access``:
+
+    >>> from uavcan.primitive import String_1_0
+    >>> bool(r.access("baz", Value()).value.empty)  # No such register.
+    True
+    >>> v = r.access("foo", Value())                # Read access.
+    >>> (v.bools, v.mutable, v.persistent)
+    ([True, False], True, False)
+    >>> v = r.access("bar", Value())                # Read access.
+    >>> (v.bools, v.mutable, v.persistent)
+    ([False, True, True], True, False)
+    >>> r.access("foo", Value(bit=Bit_1_0([False, True]))).bools          # Write, success.
+    [False, True]
+    >>> r.access("foo", Value(string=String_1_0("Hello"))).bools          # Write, bad type ignored, no change.
+    [False, True]
+    >>> r.access("bar", Value(bit=Bit_1_0([True, False, False]))).bools   # Write, success.
+    [True, False, False]
+    >>> r.access("bar.ro", Value(bit=Bit_1_0([True, True, True]))).bools  # Write, immutable register, no change.
+    [True, False, False]
+
+    Deleting registers (every backend where the match is found is affected):
+
+    >>> r.keys()
+    ['a', 'c', 'foo', 'b', 'bar', 'bar.ro']
+    >>> r.delete("*a*")
+    >>> r.keys()
+    ['c', 'foo', 'b']
     """
 
     def __init__(self, *backends: backend.Backend) -> None:
+        """
+        :param backends: Providing backend instances here is equivalent to invoking :meth:`bind` afterwards.
+        """
         self._backends: List[backend.Backend] = []
         for b in backends:
-            self.connect(b)
+            self.bind(b)
 
-    def connect(self, b: backend.Backend) -> None:
+    def bind(self, b: backend.Backend) -> None:
         """
-        Connect a new backend to this repository. Count, keys, and ordering will be invalidated.
+        Connect a new backend to this repository after the existing backends.
+        Count, keys, and ordering will be invalidated.
         If a register exists in more than one repository, only the first copy will be used;
         however, the count will include all redundant registers.
         """
@@ -73,32 +167,15 @@ class Repository:
 
     def keys(self) -> List[str]:
         """
-        >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-        >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
-        >>> b0 = SQLiteBackend()
-        >>> b0.set("c", Value())
-        >>> b0.set("a", Value())
-        >>> b1 = DynamicBackend()
-        >>> b1.register("b", lambda: Value())
-        >>> Repository(b0, b1).keys()  # Sorted lexicographically per backend.
-        ['a', 'c', 'b']
-        >>> Repository(b1, b0).keys()  # Sorted lexicographically per backend.
-        ['b', 'a', 'c']
+        Keys may not be unique if different backends redefine the same register. The user should avoid that.
         """
         return [n for b in self._backends for n in b.keys()]
 
     def get_name_at_index(self, index: int) -> Optional[str]:
         """
-        >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-        >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
-        >>> b0 = SQLiteBackend()
-        >>> b0.set("c", Value())
-        >>> b0.set("a", Value())
-        >>> b1 = DynamicBackend()
-        >>> b1.register("b", lambda: Value())
-        >>> r = Repository(b0, b1)
-        >>> r.get_name_at_index(0), r.get_name_at_index(1), r.get_name_at_index(2), r.get_name_at_index(3)
-        ('a', 'c', 'b', None)
+        This is mostly intended for implementing ``uavcan.register.List``.
+        Returns None if index is out of range.
+        The ordering is similar to :meth:`keys` (invalidated by :meth:`bind` and :meth:`delete`).
         """
         try:
             return self.keys()[index]  # This is hugely inefficient. Should iterate through backends instead.
@@ -107,22 +184,7 @@ class Repository:
 
     def get(self, name: str) -> Optional[ValueProxy]:
         """
-        >>> from uavcan.primitive.array import Bit_1_0
-        >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-        >>> b0 = SQLiteBackend()
-        >>> rs = Repository(b0)
-        >>> rs.get("foo") is None                       # No such register --> None.
-        True
-        >>> b0.set("foo", Value(bit=Bit_1_0([True, False])))
-        >>> e = rs.get("foo")
-        >>> e.bools    # Use the proxy properties to automatically convert the register value to a native type.
-        [True, False]
-        >>> e.ints
-        [1, 0]
-        >>> e.floats
-        [1.0, 0.0]
-        >>> e.value.bit.value[0], e.value.bit.value[1]  # Or just access the underlying DSDL value directly.
-        (True, False)
+        :returns: :class:`ValueProxy` if exists, otherwise None.
         """
         for b in self._backends:
             ent = b.get(name)
@@ -135,39 +197,9 @@ class Repository:
         Set if the register exists and the type of the value is matching or can be converted to the register's type.
         The mutability flag may be ignored depending on which backend the register is stored at.
 
-        :raises: :class:`MissingRegisterError` (subclass of :class:`KeyError`) if the register does not exist.
-                 :class:`ValueConversionError` if the register exists but the value cannot be converted to its type.
-
-        >>> from uavcan.primitive.array import Bit_1_0
-        >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-        >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
-        >>> b0 = SQLiteBackend()
-        >>> b1 = DynamicBackend()
-        >>> r = Repository(b0, b1)
-        >>> r.set("foo", True)                      # No such register, will fail. # doctest: +IGNORE_EXCEPTION_DETAIL
-        Traceback (most recent call last):
-        ...
-        MissingRegisterError: 'foo'
-        >>> b0.set("foo", Value(bit=Bit_1_0([True])))       # Create a new register.
-        >>> r.get("foo").bools                              # Yup, created.
-        [True]
-        >>> r.set("foo", False)                             # Now it can be set.
-        >>> r.get("foo").bools
-        [False]
-        >>> r.set("foo", [True, False])                     # Wrong dimensionality. # doctest: +IGNORE_EXCEPTION_DETAIL
-        Traceback (most recent call last):
-        ...
-        ValueConversionError: ...
-        >>> my_dynamic_register = Value(bit=Bit_1_0([True, False, False]))
-        >>> def set_my_dynamic_register(v: Value):
-        ...     global my_dynamic_register
-        ...     my_dynamic_register = v
-        >>> b1.register("bar", lambda: my_dynamic_register, set_my_dynamic_register)
-        >>> r.get("bar").bools
-        [True, False, False]
-        >>> r.set("bar", [0, 1.5, -5])     # The value type is converted automatically.
-        >>> r.get("bar").bools
-        [False, True, True]
+        :raises:
+            :class:`MissingRegisterError` (subclass of :class:`KeyError`) if the register does not exist.
+            :class:`ValueConversionError` if the register exists but the value cannot be converted to its type.
         """
         for b in self._backends:
             e = b.get(name)
@@ -184,30 +216,6 @@ class Repository:
         Perform the set/get transaction as defined by the RPC-service ``uavcan.register.Access``.
         No exceptions are raised. This method is intended for use with the register RPC-service implementations
         (essentially, this method is the entire implementation, just bind it to the session and you're all set).
-
-        >>> from uavcan.primitive import String_1_0
-        >>> from uavcan.primitive.array import Bit_1_0
-        >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-        >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
-        >>> b0 = SQLiteBackend()
-        >>> b1 = DynamicBackend()
-        >>> r = Repository(b0, b1)
-        >>> bool(r.access("foo", Value()).value.empty)                  # No such register.
-        True
-        >>> b0.set("foo", Value(bit=Bit_1_0([True])))
-        >>> b1.register("bar", lambda: Value(bit=Bit_1_0([False])))
-        >>> v = r.access("foo", Value())                                # Read access.
-        >>> (v.bools, v.mutable, v.persistent)
-        ([True], True, False)
-        >>> v = r.access("bar", Value())                                # Read access.
-        >>> (v.bools, v.mutable, v.persistent)
-        ([False], False, False)
-        >>> r.access("foo", Value(bit=Bit_1_0([False]))).bools          # Write access.
-        [False]
-        >>> r.access("foo", Value(string=String_1_0("Hello"))).bools    # Write access, bad type ignored.
-        [False]
-        >>> r.access("bar", Value(bit=Bit_1_0([True]))).bools           # Write access, not writable.
-        [False]
         """
         for b in self._backends:
             e = b.get(name)
@@ -228,18 +236,7 @@ class Repository:
     def delete(self, wildcard: str) -> None:
         """
         Remove registers that match the specified wildcard from all backends. Matching is case-sensitive.
-
-        >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-        >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
-        >>> b0 = SQLiteBackend()
-        >>> b0.set("foo.bar", Value())
-        >>> b0.set("zoo.bar", Value())
-        >>> b1 = DynamicBackend()
-        >>> b1.register("foo.baz", lambda: Value())
-        >>> r = Repository(b0, b1)
-        >>> r.delete("foo.*")
-        >>> r.keys()
-        ['zoo.bar']
+        Count and keys are invalidated.
         """
         for b in self._backends:
             names = [n for n in b.keys() if fnmatchcase(n, wildcard)]
@@ -250,22 +247,6 @@ class Repository:
         """
         Like :meth:`get`, but if the register is missing it raises :class:`MissingRegisterError`
         (subclass of :class:`KeyError`) instead of returning None.
-
-        >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-        >>> from uavcan.primitive.array import Bit_1_0
-        >>> b0 = SQLiteBackend()
-        >>> r = Repository(b0)
-        >>> r["foo"]                                           # doctest: +IGNORE_EXCEPTION_DETAIL
-        Traceback (most recent call last):
-        ...
-        MissingRegisterError: 'foo'
-        >>> b0.set("foo", Value(bit=Bit_1_0([True])))
-        >>> r["foo"].bools
-        [True]
-        >>> r["foo"].ints
-        [1]
-        >>> r["foo"].floats
-        [1.0]
         """
         e = self.get(item)
         if e is None:
@@ -274,29 +255,13 @@ class Repository:
 
     def __iter__(self) -> Iterator[str]:
         """
-        >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-        >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
-        >>> b0 = SQLiteBackend()
-        >>> b0.set("c", Value())
-        >>> b0.set("a", Value())
-        >>> b1 = DynamicBackend()
-        >>> b1.register("b", lambda: Value())
-        >>> list(Repository(b0, b1))
-        ['a', 'c', 'b']
+        Iterator over names.
         """
         return iter(self.keys())
 
     def __len__(self) -> int:
         """
-        >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-        >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
-        >>> b0 = SQLiteBackend()
-        >>> b0.set("c", Value())
-        >>> b0.set("a", Value())
-        >>> b1 = DynamicBackend()
-        >>> b1.register("b", lambda: Value())
-        >>> len(Repository(b0, b1))
-        3
+        Number of registers in all backends.
         """
         return sum(x.count() for x in self._backends)
 
