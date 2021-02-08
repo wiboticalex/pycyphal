@@ -7,8 +7,8 @@ from fnmatch import fnmatchcase
 from typing import List, TypeVar, Optional, Iterator
 import logging
 import pyuavcan
-from . import backend, Value
-from ._value import RelaxedValue, ValueProxy
+from . import backend
+from ._value import RelaxedValue, ValueProxy, Value
 
 
 PrimitiveType = TypeVar("PrimitiveType", bound=pyuavcan.dsdl.CompositeObject)
