@@ -50,7 +50,7 @@ class SQLiteBackend(Backend):
         return self._loc.lower() != _LOCATION_VOLATILE
 
     def count(self) -> int:
-        return self._execute(r"select count(*) from register").fetchone()[0]
+        return int(self._execute(r"select count(*) from register").fetchone()[0])
 
     def keys(self) -> typing.List[str]:
         return [x for x, in self._execute(r"select name from register order by name").fetchall()]
@@ -69,6 +69,7 @@ class SQLiteBackend(Backend):
         obj = pyuavcan.dsdl.deserialize(Value, [memoryview(value)])
         if obj is None:  # pragma: no cover
             _logger.warning("%r: Value of %r is not a valid serialization of %s: %r", self, name, Value, value)
+            return None
         e = Entry(value=obj, mutable=bool(mutable))
         _logger.debug("%r: Get %r -> %r", self, name, e)
         return e

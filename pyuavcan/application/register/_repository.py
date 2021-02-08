@@ -7,8 +7,8 @@ from fnmatch import fnmatchcase
 from typing import List, TypeVar, Optional, Iterator
 import logging
 import pyuavcan
-from . import backend
-from ._value import RelaxedValue, ValueProxy, Value
+from . import backend, Value
+from ._value import RelaxedValue, ValueProxy
 
 
 PrimitiveType = TypeVar("PrimitiveType", bound=pyuavcan.dsdl.CompositeObject)
@@ -219,9 +219,7 @@ class Repository:
         """
         for b in self._backends:
             e = b.get(name)
-            if e is None:
-                continue
-            if e.mutable and not value.empty:
+            if e is not None and e.mutable and not value.empty:
                 c = ValueProxy(e.value)
                 try:
                     c.assign(value)
@@ -230,7 +228,8 @@ class Repository:
                 else:
                     b.set(name, c.value)
                     e = b.get(name)
-            return ValueWithFlags(e.value, mutable=e.mutable, persistent=b.persistent)
+            if e is not None:
+                return ValueWithFlags(e.value, mutable=e.mutable, persistent=b.persistent)
         return ValueWithFlags(Value(), False, False)
 
     def delete(self, wildcard: str) -> None:

@@ -20,7 +20,7 @@ class DynamicBackend(Backend):
     It does not store values internally.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._reg: Dict[str, GetSetPair] = {}  # This dict is always sorted lexicographically by key!
 
     @property

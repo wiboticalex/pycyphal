@@ -3,7 +3,7 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Union, Iterable, List, Any, Optional
+from typing import Union, Iterable, List, Any, Optional, no_type_check
 import numpy
 import pyuavcan
 from pyuavcan.dsdl import get_attribute
@@ -147,9 +147,9 @@ class ValueProxy:
         if v.empty:
             return ""
         if v.string:
-            return v.string.value.tobytes().decode("utf8")
+            return str(v.string.value.tobytes().decode("utf8"))
         if v.unstructured:
-            return v.unstructured.value.tobytes().decode("utf8", "ignore")
+            return str(v.unstructured.value.tobytes().decode("utf8", "ignore"))
         raise ValueConversionError(f"{v!r} cannot be converted to string")
 
     def __bytes__(self) -> bytes:
@@ -157,9 +157,9 @@ class ValueProxy:
         if v.empty:
             return b""
         if v.string:
-            return v.string.value.tobytes()
+            return bytes(v.string.value.tobytes())
         if v.unstructured:
-            return v.unstructured.value.tobytes()
+            return bytes(v.unstructured.value.tobytes())
         raise ValueConversionError(f"{v!r} cannot be converted to bytes")
 
     def __repr__(self) -> str:
@@ -289,6 +289,7 @@ def _get_option_name(x: Value) -> str:
     raise TypeError(f"Invalid value: {x!r}; expected option names: {VALUE_OPTION_NAMES}")  # pragma: no cover
 
 
+@no_type_check
 def _unittest_strictify() -> None:
     import pytest
 
@@ -306,12 +307,13 @@ def _unittest_strictify() -> None:
     assert _strictify(b"Hello").unstructured.value.tobytes() == b"Hello"
 
 
+@no_type_check
 def _unittest_convert() -> None:
     import pytest
 
     q = Value
 
-    def _once(a: q, b: RelaxedValue) -> q:
+    def _once(a: Value, b: RelaxedValue) -> Value:
         c = ValueProxy(a)
         c.assign(b)
         return c.value
