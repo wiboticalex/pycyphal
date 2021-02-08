@@ -4,50 +4,59 @@
 
 from __future__ import annotations
 from fnmatch import fnmatchcase
-import typing
+from typing import List, TypeVar, Optional, Iterator, Union
 import logging
 import pyuavcan
-from .storage import Storage, Entry, Value
-from ._primitives import RelaxedValue, convert
+from . import storage
+from ._value import RelaxedValue, ValueProxy, Value
 
 
-PrimitiveType = typing.TypeVar("PrimitiveType", bound=pyuavcan.dsdl.CompositeObject)
-
-
-class ConflictError(ValueError):
-    pass
+PrimitiveType = TypeVar("PrimitiveType", bound=pyuavcan.dsdl.CompositeObject)
 
 
 class MissingRegisterError(KeyError):
-    pass
+    """
+    Raised when the user attempts to access a register that is not defined,
+    and the requested operation is not going to create it.
+    """
 
 
-class Repository:
-    def __init__(self, backend: Storage) -> None:
-        """
-        :param backend: The storage backend to store data in. The persistency flag is inherited from it.
+class ValueWithFlags(ValueProxy):
+    """
+    This is like :class:`ValueProxy` but extended with register flags.
+    """
 
-        >>> from pyuavcan.application.register.storage.sqlite import SQLiteStorage
-        >>> Repository(SQLiteStorage()).persistent
-        False
-        >>> import tempfile
-        >>> rs = Repository(SQLiteStorage(tempfile.mktemp(".db")))
-        >>> rs.persistent
-        True
-        >>> rs.close()
-        """
-        self._storage = backend
+    def __init__(self, msg: Value, mutable: bool, persistent: bool) -> None:
+        super().__init__(msg)
+        self._mutable = mutable
+        self._persistent = persistent
+
+    @property
+    def mutable(self) -> bool:
+        return self._mutable
 
     @property
     def persistent(self) -> bool:
-        """True if the storage backend is persistent, False if it is in-memory."""
-        return self._storage.persistent
+        return self._persistent
+
+    def __repr__(self) -> str:
+        return pyuavcan.util.repr_attributes(self, self.value, mutable=self.mutable, persistent=self.persistent)
+
+
+class Repository:
+    def __init__(self, backend: storage.Storage) -> None:
+        """
+        :param backend: The storage backend to store the data in. The persistence flag is inherited from it.
+        """
+        self._storage = backend
 
     def close(self) -> None:
-        """Closes the file handles related to the storage."""
+        """
+        Closes the storage instance. Further access may no longer be possible.
+        """
         self._storage.close()
 
-    def keys(self) -> typing.List[str]:
+    def keys(self) -> List[str]:
         """
         >>> from pyuavcan.application.register.storage.sqlite import SQLiteStorage
         >>> rs = Repository(SQLiteStorage())
@@ -56,9 +65,9 @@ class Repository:
         >>> rs.keys()  # Sorted lexicographically.
         ['a', 'b']
         """
-        return self._storage.get_names()
+        return self._storage.keys()
 
-    def get_name_at_index(self, index: int) -> typing.Optional[str]:
+    def get_name_at_index(self, index: int) -> Optional[str]:
         """
         >>> from pyuavcan.application.register.storage.sqlite import SQLiteStorage
         >>> rs = Repository(SQLiteStorage())
@@ -70,7 +79,7 @@ class Repository:
         """
         return self._storage.get_name_at_index(index)
 
-    def get(self, name: str) -> typing.Optional[Entry]:
+    def get(self, name: str) -> Optional[ValueProxy]:
         """
         >>> from pyuavcan.application.register.storage.sqlite import SQLiteStorage
         >>> from uavcan.primitive.array import Bit_1_0
@@ -79,14 +88,17 @@ class Repository:
         True
         >>> rs.create("foo", Value(bit=Bit_1_0([True, False])))
         >>> e = rs.get("foo")
-        >>> not e.value.empty                           # Detect the type by querying the union fields.
-        True
-        >>> not e.value.string                          # etc...
-        True
-        >>> e.value.bit.value[0], e.value.bit.value[1]  # The value is a standard NumPy array.
+        >>> e.bools    # Use the proxy properties to automatically convert the register value to a native type.
+        [True, False]
+        >>> e.ints
+        [1, 0]
+        >>> e.floats
+        [1.0, 0.0]
+        >>> e.value.bit.value[0], e.value.bit.value[1]  # Or just access the underlying DSDL value directly.
         (True, False)
         """
-        return self._storage.get(name)
+        ent = self._storage.get(name)
+        return ValueProxy(ent.value) if ent is not None else None
 
     def set(self, name: str, value: RelaxedValue) -> None:
         """
@@ -94,7 +106,7 @@ class Repository:
         The mutability flag is ignored.
 
         :raises: :class:`MissingRegisterError` (subclass of :class:`KeyError`) if the register does not exist.
-                 :class:`ConflictError` if the register exists but the value cannot be converted to its type.
+                 :class:`ValueConversionError` if the register exists but the value cannot be converted to its type.
 
         >>> from pyuavcan.application.register.storage.sqlite import SQLiteStorage
         >>> rs = Repository(SQLiteStorage())
@@ -104,34 +116,36 @@ class Repository:
         MissingRegisterError: 'foo'
         >>> from uavcan.primitive.array import Bit_1_0
         >>> rs.create("foo", Value(bit=Bit_1_0([True])))    # Create explicitly.
-        >>> rs.get("foo").value.bit.value[0]                # Yup, created.
-        True
+        >>> rs.get("foo").bools                             # Yup, created.
+        [True]
         >>> rs.set("foo", False)                            # Now it can be set.
-        >>> rs.get("foo").value.bit.value[0]
-        False
+        >>> rs.get("foo").bools
+        [False]
         >>> rs.set("foo", [True, False])                    # Wrong dimensionality. # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
         ...
-        ConflictError: ...
+        ValueConversionError: ...
         """
         e = self._storage.get(name)
         if not e:
             raise MissingRegisterError(name)
-        converted = convert(e.value, value)
-        if not converted:
-            raise ConflictError(f"Cannot assign {e.value!r} from {value!r}")
-        self._storage.set(name, Entry(converted, mutable=e.mutable))
+        converted = ValueProxy(e.value)
+        converted.assign(value)
+        self._storage.set(name, storage.Entry(converted.value, mutable=e.mutable))
 
-    def create(self, name: str, value: Value, *, mutable: bool = True) -> None:
+    def create(self, name: str, value: Union[Value, ValueProxy], *, mutable: bool = True) -> None:
         """
         If the register exists, behaves like :meth:`set` and the flags are ignored. Otherwise it is created.
         """
+        if isinstance(value, ValueProxy):
+            value = value.value
+        assert isinstance(value, Value)
         try:
             self.set(name, value)
         except MissingRegisterError:
-            self._storage.set(name, Entry(value, mutable=mutable))
+            self._storage.set(name, storage.Entry(value, mutable=mutable))
 
-    def access(self, name: str, value: Value) -> Entry:
+    def access(self, name: str, value: Value) -> ValueWithFlags:
         """
         Perform the set/get transaction as defined by the RPC-service ``uavcan.register.Access``.
         No exceptions are raised. This method is intended for use with RPC-service implementations.
@@ -142,19 +156,25 @@ class Repository:
         True
         >>> from uavcan.primitive.array import Bit_1_0
         >>> rs.create("foo", Value(bit=Bit_1_0([True])))
-        >>> rs.access("foo", Value()).value.bit.value[0]                      # Read access.
-        True
-        >>> rs.access("foo", Value(bit=Bit_1_0([False]))).value.bit.value[0]  # Write access.
-        False
+        >>> v = rs.access("foo", Value())                                     # Read access.
+        >>> (v.bools, v.mutable, v.persistent)
+        ([True], True, False)
+        >>> rs.access("foo", Value(bit=Bit_1_0([False]))).bools               # Write access.
+        [False]
         """
         e = self._storage.get(name)
         if not e:
-            return Entry(Value(), mutable=False)
-        converted = convert(e.value, value)
-        if e.mutable and converted:
-            e = Entry(converted, mutable=e.mutable)
-            self._storage.set(name, e)
-        return e  # No point querying the storage again, just return the local value.
+            return ValueWithFlags(Value(), False, False)
+        converted = ValueProxy(e.value)
+        try:
+            converted.assign(value)
+        except ValueError:
+            pass
+        else:
+            if e.mutable:
+                e = storage.Entry(converted.value, mutable=e.mutable)
+                self._storage.set(name, e)
+        return ValueWithFlags(e.value, mutable=e.mutable, persistent=self._storage.persistent)
 
     def delete(self, wildcard: str) -> None:
         """
@@ -173,7 +193,7 @@ class Repository:
         _logger.debug("Deleting %d registers matching %r: %r", len(names), wildcard, names)
         self._storage.delete(names)
 
-    def __getitem__(self, item: str) -> Entry:
+    def __getitem__(self, item: str) -> ValueProxy:
         """
         Like :meth:`get`, but if the register is missing it raises :class:`MissingRegisterError`
         (subclass of :class:`KeyError`) instead of returning None.
@@ -186,15 +206,19 @@ class Repository:
         ...
         MissingRegisterError: 'foo'
         >>> rs.create("foo", Value(bit=Bit_1_0([True])))
-        >>> rs["foo"].value.bit.value[0]
-        True
+        >>> rs["foo"].bools
+        [True]
+        >>> rs["foo"].ints
+        [1]
+        >>> rs["foo"].floats
+        [1.0]
         """
         e = self.get(item)
         if e is None:
             raise MissingRegisterError(item)
         return e
 
-    def __iter__(self) -> typing.Iterator[str]:
+    def __iter__(self) -> Iterator[str]:
         """
         >>> from pyuavcan.application.register.storage.sqlite import SQLiteStorage
         >>> rs = Repository(SQLiteStorage())

@@ -40,7 +40,7 @@ class SQLiteStorage(Storage):
             """,
             commit=True,
         )
-        _logger.debug("%r: Initialized with registers: %r", self, self.get_names())
+        _logger.debug("%r: Initialized with registers: %r", self, self.keys())
 
     @property
     def location(self) -> str:
@@ -53,13 +53,13 @@ class SQLiteStorage(Storage):
     def count(self) -> int:
         return self._execute(r"select count(*) from register").fetchone()[0]
 
-    def get_names(self) -> typing.List[str]:
+    def keys(self) -> typing.List[str]:
         return [x for x, in self._execute(r"select name from register order by name").fetchall()]
 
     def get_name_at_index(self, index: int) -> typing.Optional[str]:
         try:
             # TODO: this is super inefficient, make a request instead.
-            return self.get_names()[index]
+            return self.keys()[index]
         except IndexError:
             return None
 
@@ -119,7 +119,7 @@ def _unittest_memory() -> None:
 
     st = SQLiteStorage()
     print(st)
-    assert not st.get_names()
+    assert not st.keys()
     assert not st.get_name_at_index(0)
     assert None is st.get("foo")
     assert st.count() == 0
@@ -142,13 +142,13 @@ def _unittest_memory() -> None:
     assert e.mutable
     assert st.count() == 1
 
-    assert ["foo"] == st.get_names()
+    assert ["foo"] == st.keys()
     assert "foo" == st.get_name_at_index(0)
     assert None is st.get_name_at_index(1)
     st.delete(["baz"])
-    assert ["foo"] == st.get_names()
+    assert ["foo"] == st.keys()
     st.delete(["foo", "baz"])
-    assert [] == st.get_names()
+    assert [] == st.keys()
     assert st.count() == 0
 
     st.close()

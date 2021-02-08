@@ -51,7 +51,7 @@ class Storage(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def get_names(self) -> typing.List[str]:
+    def keys(self) -> typing.List[str]:
         """
         :returns: List of all registers ordered lexicographically.
         """
