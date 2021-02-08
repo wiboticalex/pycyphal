@@ -113,7 +113,7 @@ def test(session):
     #   2. At least MyPy has to be run separately per Python version we support.
     # If the interpreter is not CPython, this may need to be conditionally disabled.
     session.install(
-        "mypy   == 0.790",
+        "mypy   == 0.800",
         "pylint == 2.6.0",
     )
     session.run("mypy", "--strict", *map(str, src_dirs), str(compiled_dir))
