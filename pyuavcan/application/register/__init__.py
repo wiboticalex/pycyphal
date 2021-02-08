@@ -25,7 +25,7 @@ from ._value import ValueProxy as ValueProxy
 from ._value import RelaxedValue as RelaxedValue
 from ._value import ValueConversionError as ValueConversionError
 
-from . import storage as storage
-from .storage import Value as Value
+from . import backend as backend
+from .backend import Value as Value
 
 from ._env_var import parse_environment_variables as parse_environment_variables

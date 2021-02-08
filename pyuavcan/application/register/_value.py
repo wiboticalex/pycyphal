@@ -7,7 +7,7 @@ from typing import Union, Iterable, List, Any, Optional
 import numpy
 import pyuavcan
 from pyuavcan.dsdl import get_attribute
-from .storage import Value
+from .backend import Value
 from . import String, Unstructured, Bit
 from . import Integer8, Integer16, Integer32, Integer64
 from . import Natural8, Natural16, Natural32, Natural64

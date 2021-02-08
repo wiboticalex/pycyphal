@@ -8,8 +8,7 @@ from pathlib import Path
 import logging
 import sqlite3
 import pyuavcan
-from uavcan.register import Value_1_0 as Value
-from . import Entry, StorageError, Storage
+from . import Entry, BackendError, Backend, Value
 
 
 _TIMEOUT = 0.5
@@ -17,7 +16,7 @@ _LOCATION_VOLATILE = ":memory:"
 
 
 # noinspection SqlNoDataSourceInspection,SqlResolve
-class SQLiteStorage(Storage):
+class SQLiteBackend(Backend):
     """
     Register storage backend implementation based on SQLite.
     Supports either persistent on-disk single-file storage or volatile in-memory storage.
@@ -33,8 +32,8 @@ class SQLiteStorage(Storage):
             r"""
             create table if not exists `register` (
                 `name`      varchar(255) not null unique primary key,
-                `mutable`   boolean not null,
                 `value`     blob not null,
+                `mutable`   boolean not null,
                 `ts`        time not null default current_timestamp
             )
             """,
@@ -57,11 +56,8 @@ class SQLiteStorage(Storage):
         return [x for x, in self._execute(r"select name from register order by name").fetchall()]
 
     def get_name_at_index(self, index: int) -> typing.Optional[str]:
-        try:
-            # TODO: this is super inefficient, make a request instead.
-            return self.keys()[index]
-        except IndexError:
-            return None
+        res = self._execute(r"select name from register order by name limit 1 offset ?", index).fetchone()
+        return res[0] if res else None
 
     def get(self, name: str) -> typing.Optional[Entry]:
         res = self._execute(r"select mutable, value from register where name = ?", name).fetchone()
@@ -77,15 +73,18 @@ class SQLiteStorage(Storage):
         _logger.debug("%r: Get %r -> %r", self, name, e)
         return e
 
-    def set(self, name: str, e: Entry) -> None:
+    def set(self, name: str, value: Value) -> None:
+        """
+        If the register does not exist, it will be implicitly created.
+        """
+        e = Entry(value, mutable=True)  # Mutability flag may be made mutable later.
         _logger.debug("%r: Set %r <- %r", self, name, e)
-        serialized = b"".join(pyuavcan.dsdl.serialize(e.value))
         # language=SQLite
         self._execute(
-            r"insert or replace into register (name, mutable, value) values (?, ?, ?)",
+            r"insert or replace into register (name, value, mutable) values (?, ?, ?)",
             name,
+            b"".join(pyuavcan.dsdl.serialize(e.value)),
             e.mutable,
-            serialized,
             commit=True,
         )
 
@@ -95,7 +94,7 @@ class SQLiteStorage(Storage):
             self._db.executemany(r"delete from register where name = ?", ((x,) for x in names))
             self._db.commit()
         except sqlite3.OperationalError as ex:
-            raise StorageError(f"Could not delete {len(names)} registers: {ex}")
+            raise BackendError(f"Could not delete {len(names)} registers: {ex}")
 
     def close(self) -> None:
         _logger.debug("%r: Closing", self)
@@ -108,7 +107,7 @@ class SQLiteStorage(Storage):
                 self._db.commit()
             return cur
         except sqlite3.OperationalError as ex:
-            raise StorageError(f"Database transaction has failed: {ex}") from ex
+            raise BackendError(f"Database transaction has failed: {ex}") from ex
 
 
 _logger = logging.getLogger(__name__)
@@ -117,7 +116,7 @@ _logger = logging.getLogger(__name__)
 def _unittest_memory() -> None:
     from uavcan.primitive import String_1_0 as String, Unstructured_1_0 as Unstructured
 
-    st = SQLiteStorage()
+    st = SQLiteBackend()
     print(st)
     assert not st.keys()
     assert not st.get_name_at_index(0)
@@ -125,16 +124,16 @@ def _unittest_memory() -> None:
     assert st.count() == 0
     st.delete(["foo"])
 
-    st.set("foo", Entry(Value(string=String("Hello world!")), mutable=False))
+    st.set("foo", Value(string=String("Hello world!")))
     e = st.get("foo")
     assert e
     assert e.value.string
     assert e.value.string.value.tobytes().decode() == "Hello world!"
-    assert not e.mutable
+    assert e.mutable
     assert st.count() == 1
 
     # Override the same register.
-    st.set("foo", Entry(Value(unstructured=Unstructured([1, 2, 3])), mutable=True))
+    st.set("foo", Value(unstructured=Unstructured([1, 2, 3])))
     e = st.get("foo")
     assert e
     assert e.value.unstructured
@@ -161,26 +160,26 @@ def _unittest_file() -> None:
     # First, populate the database with registers.
     db_file = tempfile.mktemp(".db")
     print("DB file:", db_file)
-    st = SQLiteStorage(db_file)
+    st = SQLiteBackend(db_file)
     print(st)
-    st.set("mutable", Entry(Value(unstructured=Unstructured([1, 2, 3])), mutable=True))
-    st.set("immutable", Entry(Value(unstructured=Unstructured([4, 5, 6])), mutable=False))
+    st.set("a", Value(unstructured=Unstructured([1, 2, 3])))
+    st.set("b", Value(unstructured=Unstructured([4, 5, 6])))
     assert st.count() == 2
     st.close()
 
     # Then re-open it in writeable mode and ensure correctness.
-    st = SQLiteStorage(db_file)
+    st = SQLiteBackend(db_file)
     print(st)
     assert st.count() == 2
-    e = st.get("mutable")
+    e = st.get("a")
     assert e
     assert e.value.unstructured
     assert e.value.unstructured.value.tobytes() == b"\x01\x02\x03"
     assert e.mutable
 
-    e = st.get("immutable")
+    e = st.get("b")
     assert e
     assert e.value.unstructured
     assert e.value.unstructured.value.tobytes() == b"\x04\x05\x06"
-    assert not e.mutable
+    assert e.mutable
     st.close()

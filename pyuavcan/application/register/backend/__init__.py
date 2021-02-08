@@ -10,7 +10,7 @@ import pyuavcan
 from uavcan.register import Value_1_0 as Value
 
 
-class StorageError(RuntimeError):
+class BackendError(RuntimeError):
     """
     Unsuccessful storage transaction. This is a very low-level error representing a system configuration issue.
     """
@@ -22,9 +22,9 @@ class Entry:
     mutable: bool
 
 
-class Storage(abc.ABC):
+class Backend(abc.ABC):
     """
-    Register storage backend interface.
+    Register backend interface.
     """
 
     @property
@@ -68,22 +68,25 @@ class Storage(abc.ABC):
     @abc.abstractmethod
     def get(self, name: str) -> typing.Optional[Entry]:
         """
-        :returns: None if no such register is available; otherwise value and mutability flag.
+        :returns: None if no such register is available; otherwise :class:`Entry`.
         """
         raise NotImplementedError
 
     @abc.abstractmethod
-    def set(self, name: str, e: Entry) -> None:
+    def set(self, name: str, value: Value) -> None:
         """
-        If the register does not exist, it will be created.
-        If exists, it will be overwritten unconditionally with the specified value and mutability flag.
+        If the register does not exist, the behavior is implementation-defined.
+        If exists, it will be overwritten unconditionally with the specified value.
+        The value shall be of the same type as the register, the caller is responsible to ensure that
+        (implementations may lift this restriction if the type can be changed).
+        The mutability flag may be ignored.
         """
         raise NotImplementedError
 
     @abc.abstractmethod
     def delete(self, names: typing.Sequence[str]) -> None:
         """
-        Removes specified registers from the storage.
+        Removes specified registers from the storage. Non-existent names are simply ignored.
         """
         raise NotImplementedError
 
@@ -92,4 +95,4 @@ class Storage(abc.ABC):
         raise NotImplementedError
 
     def __repr__(self) -> str:
-        return pyuavcan.util.repr_attributes(self, repr(self.location))
+        return pyuavcan.util.repr_attributes(self, repr(self.location), persistent=self.persistent)
