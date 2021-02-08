@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 from fnmatch import fnmatchcase
-from typing import List, TypeVar, Optional, Iterator
+from typing import List, TypeVar, Optional, Iterator, Iterable
 import logging
 import pyuavcan
 from . import backend
@@ -16,8 +16,7 @@ PrimitiveType = TypeVar("PrimitiveType", bound=pyuavcan.dsdl.CompositeObject)
 
 class MissingRegisterError(KeyError):
     """
-    Raised when the user attempts to access a register that is not defined,
-    and the requested operation is not going to create it.
+    Raised when the user attempts to access a register that is not defined.
     """
 
 
@@ -49,7 +48,7 @@ class Repository:
     It is a facade that provides user-friendly API on top of multiple underlying register backends
     (see :class:`backend.Backend`).
 
-    API basics:
+    Here's how to use it. First, we need backends to set up the repository on top of:
 
     >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
     >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
@@ -58,33 +57,38 @@ class Repository:
     >>> b0.set("a", Value())
     >>> b1 = DynamicBackend()
     >>> b1.register("b", lambda: Value())
-    >>> r = Repository(b0, b1)
-    >>> r.keys()  # Sorted lexicographically per backend.
+
+    We can modify backends and add additional ones after the repository is set up --
+    it doesn't keep any internal state and is fully transparent.
+    Moving on:
+
+    >>> r = Repository([b0, b1])
+    >>> r.keys()                        # Sorted lexicographically per backend.
     ['a', 'c', 'b']
-    >>> Repository(b1, b0).keys()  # Notice how the order is affected.
+    >>> Repository([b1, b0]).keys()     # Notice how the order is affected.
     ['b', 'a', 'c']
     >>> r.get_name_at_index(0), r.get_name_at_index(1), r.get_name_at_index(2), r.get_name_at_index(3)
     ('a', 'c', 'b', None)
-    >>> list(r)     # The repository keys are iterable.
+    >>> list(r)                         # The repository keys are iterable.
     ['a', 'c', 'b']
-    >>> len(r)      # The number of registers.
+    >>> len(r)                          # The number of registers.
     3
 
     Get/set behaviors:
 
-    >>> from uavcan.primitive.array import Bit_1_0
-    >>> r.get("foo") is None            # No such register --> None.
+    >>> from pyuavcan.application.register import Bit
+    >>> r.get("foo") is None    # No such register --> None.
     True
-    >>> r["foo"]                        # This is an alternative. # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> r["foo"]                # This is an alternative to get(). # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
     ...
     MissingRegisterError: 'baz'
-    >>> r.set("foo", True)              # No such register --> exception. # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> r.set("foo", True)      # No such register --> exception. # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
     ...
     MissingRegisterError: 'foo'
-    >>> b0.set("foo", Value(bit=Bit_1_0([True, False])))    # Create register "foo" in SQL backend.
-    >>> e = r.get("foo")                                    # Now it is gettable.
+    >>> b0.set("foo", Value(bit=Bit([True, False])))    # Create register "foo" in the SQLite backend.
+    >>> e = r.get("foo")                                # Now it is gettable.
     >>> e.bools    # Use the proxy properties to automatically convert the register value to a native type.
     [True, False]
     >>> e.ints
@@ -95,43 +99,43 @@ class Repository:
     (True, False)
     >>> r["foo"].ints                               # The alternative way that mimics dict.
     [1, 0]
-    >>> r.set("foo", [True, False, False])  # Wrong dimensionality (3 items, not 2). # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> r.set("foo", [True, False, False])          # Dimensionality mismatch. # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
     ...
     ValueConversionError: ...
-    >>> my_dynamic_register = Value(bit=Bit_1_0([True, False, False]))
-    >>> def set_my_dynamic_register(v: Value):
-    ...     global my_dynamic_register
-    ...     my_dynamic_register = v
-    >>> b1.register("bar", lambda: my_dynamic_register, set_my_dynamic_register)
-    >>> b1.register("bar.ro", lambda: my_dynamic_register)  # Read-only register.
+    >>> val = Value(bit=Bit([True, False, False]))
+    >>> def set_val(v: Value):
+    ...     global val
+    ...     val = v
+    >>> b1.register("bar", lambda: val, set_val)
+    >>> b1.register("bar.ro", lambda: val)          # Read-only register.
     >>> r.get("bar").bools
     [True, False, False]
-    >>> r.set("bar", [0, 1.5, -5])     # The value type is converted automatically.
+    >>> r.set("bar", [0, 1.5, -5])                  # The value type is converted automatically.
     >>> r["bar"].floats
     [0.0, 1.0, 1.0]
 
-    Access method implements the logic of ``uavcan.register.Access``:
+    Method :meth:`access` implements the logic of ``uavcan.register.Access``:
 
-    >>> from uavcan.primitive import String_1_0
-    >>> bool(r.access("baz", Value()).value.empty)  # No such register.
+    >>> from pyuavcan.application.register import String
+    >>> bool(r.access("baz", Value()).value.empty)                      # No such register.
     True
-    >>> v = r.access("foo", Value())                # Read access.
+    >>> v = r.access("foo", Value())                                    # Read access.
     >>> (v.bools, v.mutable, v.persistent)
     ([True, False], True, False)
-    >>> v = r.access("bar", Value())                # Read access.
+    >>> v = r.access("bar", Value())                                    # Read access.
     >>> (v.bools, v.mutable, v.persistent)
     ([False, True, True], True, False)
-    >>> r.access("foo", Value(bit=Bit_1_0([False, True]))).bools          # Write, success.
+    >>> r.access("foo", Value(bit=Bit([False, True]))).bools            # Write, success.
     [False, True]
-    >>> r.access("foo", Value(string=String_1_0("Hello"))).bools          # Write, bad type ignored, no change.
+    >>> r.access("foo", Value(string=String("Hello"))).bools            # Write, bad type ignored, no change.
     [False, True]
-    >>> r.access("bar", Value(bit=Bit_1_0([True, False, False]))).bools   # Write, success.
+    >>> r.access("bar", Value(bit=Bit([True, False, False]))).bools     # Write, success.
     [True, False, False]
-    >>> r.access("bar.ro", Value(bit=Bit_1_0([True, True, True]))).bools  # Write, immutable register, no change.
+    >>> r.access("bar.ro", Value(bit=Bit([True, True, True]))).bools    # Write, immutable register, no change.
     [True, False, False]
 
-    Deleting registers (every backend where the match is found is affected):
+    Deleting registers (every backend where matching names are found is affected):
 
     >>> r.keys()
     ['a', 'c', 'foo', 'b', 'bar', 'bar.ro']
@@ -140,7 +144,7 @@ class Repository:
     ['c', 'foo', 'b']
     """
 
-    def __init__(self, *backends: backend.Backend) -> None:
+    def __init__(self, backends: Iterable[backend.Backend]) -> None:
         """
         :param backends: Providing backend instances here is equivalent to invoking :meth:`bind` afterwards.
         """
@@ -216,6 +220,12 @@ class Repository:
         Perform the set/get transaction as defined by the RPC-service ``uavcan.register.Access``.
         No exceptions are raised. This method is intended for use with the register RPC-service implementations
         (essentially, this method is the entire implementation, just bind it to the session and you're all set).
+
+        If write is requested (that is, the value argument is not ``empty``),
+        implicit type conversion is performed by invoking :meth:`ValueProxy.assign`.
+        This behavior ensures that the service client may write the register correctly even if the request
+        object is using a different type.
+        For instance, it is possible to assign a register of type ``bool[x]`` from ``real64[x]``.
         """
         for b in self._backends:
             e = b.get(name)

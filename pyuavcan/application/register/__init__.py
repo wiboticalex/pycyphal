@@ -18,14 +18,14 @@ from uavcan.primitive.array import Real64_1_0 as Real64
 from uavcan.primitive.array import Real32_1_0 as Real32
 from uavcan.primitive.array import Real16_1_0 as Real16
 
-from . import backend as backend
-
-from ._repository import Repository as Repository
-from ._repository import MissingRegisterError as MissingRegisterError
-
 from ._value import Value as Value
 from ._value import ValueProxy as ValueProxy
 from ._value import RelaxedValue as RelaxedValue
 from ._value import ValueConversionError as ValueConversionError
+
+from . import backend as backend
+
+from ._repository import Repository as Repository
+from ._repository import MissingRegisterError as MissingRegisterError
 
 from ._env_var import parse_environment_variables as parse_environment_variables

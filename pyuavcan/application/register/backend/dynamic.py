@@ -8,10 +8,7 @@ import logging
 from . import Entry, BackendError, Backend, Value
 
 
-GetSetPair = Tuple[
-    Callable[[], Value],
-    Optional[Callable[[Value], None]],
-]
+__all__ = ["DynamicBackend"]
 
 
 class DynamicBackend(Backend):
@@ -25,11 +22,27 @@ class DynamicBackend(Backend):
 
     @property
     def location(self) -> str:
+        """This is a stub."""
         return ""
 
     @property
     def persistent(self) -> bool:
+        """Always false."""
         return False
+
+    def register(
+        self,
+        name: str,
+        getter: Callable[[], Value],
+        setter: Optional[Callable[[Value], None]] = None,
+    ) -> None:
+        """
+        Add a new dynamic register. If such name is already registered, it is overwritten.
+        If only getter is provided, the register will be treated as immutable.
+        """
+        items = list(self._reg.items())
+        items.append((name, (getter, setter)))
+        self._reg = dict(sorted(items, key=lambda x: x[0]))
 
     def count(self) -> int:
         return len(self._reg)
@@ -80,22 +93,14 @@ class DynamicBackend(Backend):
                 pass
 
     def close(self) -> None:
+        """Clears all registered registers."""
         self._reg.clear()
 
-    def register(
-        self,
-        name: str,
-        getter: Callable[[], Value],
-        setter: Optional[Callable[[Value], None]] = None,
-    ) -> None:
-        """
-        Add a new dynamic register. If such name is already registered, it is overwritten.
-        If only getter is provided, the register will be treated as immutable.
-        """
-        items = list(self._reg.items())
-        items.append((name, (getter, setter)))
-        self._reg = dict(sorted(items, key=lambda x: x[0]))
 
+GetSetPair = Tuple[
+    Callable[[], Value],
+    Optional[Callable[[Value], None]],
+]
 
 _logger = logging.getLogger(__name__)
 

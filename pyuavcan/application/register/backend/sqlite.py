@@ -11,6 +11,9 @@ import pyuavcan
 from . import Entry, BackendError, Backend, Value
 
 
+__all__ = ["SQLiteBackend"]
+
+
 _TIMEOUT = 0.5
 _LOCATION_VOLATILE = ":memory:"
 
@@ -95,7 +98,7 @@ class SQLiteBackend(Backend):
             self._db.executemany(r"delete from register where name = ?", ((x,) for x in names))
             self._db.commit()
         except sqlite3.OperationalError as ex:
-            raise BackendError(f"Could not delete {len(names)} registers: {ex}")
+            raise BackendError(f"Could not delete {len(names)} registers: {ex}") from ex
 
     def close(self) -> None:
         _logger.debug("%r: Closing", self)

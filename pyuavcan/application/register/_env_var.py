@@ -25,7 +25,8 @@ def parse_environment_variables(env: Optional[Dict[str, str]] = None) -> List[Tu
     >>> (name + "." + ty).upper().replace(".", "_" * 2)  # Name mapping rule.
     'M__MOTOR__FLUX_LINKAGE__REAL32'
 
-    Where ``ty`` is the name of the value option from ``uavcan.register.Value``, like ``bit``, ``integer8``, etc.
+    Where ``ty`` is the name of the value option from ``uavcan.register.Value`` (see :class:`Value`),
+    like ``bit``, ``integer8``, etc.
     Environment variables that contain invalid values or named incorrectly are simply ignored.
 
     - ``string`` values are accepted as-is.
@@ -75,6 +76,8 @@ def _parse(env: Dict[str, str]) -> Iterable[Tuple[str, Value]]:
 
 
 def _parse_value(ty: str, text: str) -> Optional[Value]:
+    # pylint: disable=multiple-statements
+
     if ty == "empty":
         return Value(empty=Empty())
     if ty == "string":

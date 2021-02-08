@@ -25,13 +25,12 @@ VALUE_OPTION_NAMES = [x for x in dir(Value) if not x.startswith("_")]
 
 class ValueProxy:
     """
-    This a wrapper over the standard ``uavcan.register.Value`` with convenience accessors added that enable
-    automatic conversion (with implicit casting) between native Python types and DSDL types.
+    This a wrapper over the standard ``uavcan.register.Value`` (transpiled into :class:`Value`)
+    with convenience accessors added that enable automatic conversion (with implicit casting)
+    between native Python types and DSDL types.
 
-    >>> from uavcan.primitive.array import Bit_1_0
-    >>> from uavcan.primitive import String_1_0
-    >>> from uavcan.primitive import Unstructured_1_0
-    >>> p = ValueProxy(Value(bit=Bit_1_0([True, False])))
+    >>> from pyuavcan.application.register import Real64, Bit, String, Unstructured
+    >>> p = ValueProxy(Value(bit=Bit([True, False])))
     >>> p.bools
     [True, False]
     >>> p.ints
@@ -41,14 +40,30 @@ class ValueProxy:
     >>> p.assign([0, 1.0])
     >>> p.bools
     [False, True]
-    >>> p = ValueProxy(Value(bit=Bit_1_0([False])))
+
+    >>> p = ValueProxy(Value(real64=Real64([0, 1.5, 2.3, -9])))
+    >>> p.floats
+    [0.0, 1.5, 2.3, -9.0]
+    >>> p.ints
+    [0, 2, 2, -9]
+    >>> p.bools
+    [False, True, True, True]
+    >>> p.assign(Value(bit=Bit([False, True, False, True])))
+    >>> p.floats
+    [0.0, 1.0, 0.0, 1.0]
+
+    >>> p = ValueProxy(Value(bit=Bit([False])))
     >>> bool(p)
     False
     >>> int(p)
     0
     >>> float(p)
     0.0
-    >>> p = ValueProxy(Value(string=String_1_0("Hello world!")))
+    >>> p.assign(1)
+    >>> bool(p), int(p), float(p)
+    (True, 1, 1.0)
+
+    >>> p = ValueProxy(Value(string=String("Hello world!")))
     >>> str(p)
     'Hello world!'
     >>> bytes(p)
@@ -58,7 +73,8 @@ class ValueProxy:
     'Another string'
     >>> bytes(p)
     b'Another string'
-    >>> p = ValueProxy(Value(unstructured=Unstructured_1_0(b"ab01")))
+
+    >>> p = ValueProxy(Value(unstructured=Unstructured(b"ab01")))
     >>> str(p)
     'ab01'
     >>> bytes(p)
@@ -95,6 +111,7 @@ class ValueProxy:
         """
         Converts the value to a list of floats, or raises :class:`ValueConversionError` if not possible.
         """
+        # pylint: disable=multiple-statements
 
         def cast(a: Any) -> List[float]:
             return [float(x) for x in a.value]
@@ -206,6 +223,7 @@ def _do_convert(to: Value, s: Value) -> Optional[Value]:
     """
     This is a bit rough around the edges; consider it to be an MVP.
     """
+    # pylint: disable=multiple-statements
     if to.empty or s.empty:  # Everything is convertible to empty, and empty is convertible to everything.
         return to
     if (to.string and s.string) or (to.unstructured and s.unstructured):
@@ -245,6 +263,7 @@ def _do_convert(to: Value, s: Value) -> Optional[Value]:
 
 
 def _strictify(s: RelaxedValue) -> Value:
+    # pylint: disable=multiple-statements
     # fmt: off
     if isinstance(s, Value):                return s
     if isinstance(s, ValueProxy):           return s.value
