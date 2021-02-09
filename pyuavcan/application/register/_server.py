@@ -35,6 +35,8 @@ class Server:
     >>> b0 = SQLiteBackend(mktemp(".db"))
     >>> b0.set("foo", Value(integer64=Integer64([1, 20, -100])))
     >>> registry = Registry([b0])
+    >>> registry["foo"].ints                    # Yup, the registry is set up with our dummy register.
+    [1, 20, -100]
 
     Instantiate and launch the server:
 

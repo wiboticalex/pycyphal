@@ -20,7 +20,7 @@ class MissingRegisterError(KeyError):
     """
 
 
-class ValueWithFlags(ValueProxy):
+class ValueProxyWithFlags(ValueProxy):
     """
     This is like :class:`ValueProxy` but extended with register flags.
     """
@@ -169,14 +169,14 @@ class Registry:
         except LookupError:
             return None
 
-    def get(self, name: str) -> Optional[ValueWithFlags]:
+    def get(self, name: str) -> Optional[ValueProxyWithFlags]:
         """
         :returns: :class:`ValueProxy` if exists, otherwise None.
         """
         for b in self._backends:
             ent = b.get(name)
             if ent is not None:
-                return ValueWithFlags(ent.value, mutable=ent.mutable, persistent=b.persistent)
+                return ValueProxyWithFlags(ent.value, mutable=ent.mutable, persistent=b.persistent)
         return None
 
     def set(self, name: str, value: RelaxedValue) -> None:
@@ -209,7 +209,7 @@ class Registry:
             _logger.debug("%r: Deleting %d registers matching %r from %r: %r", self, len(names), wildcard, b, names)
             b.delete(names)
 
-    def __getitem__(self, key: str) -> ValueProxy:
+    def __getitem__(self, key: str) -> ValueProxyWithFlags:
         """
         Like :meth:`get`, but if the register is missing it raises :class:`MissingRegisterError`
         (subclass of :class:`KeyError`) instead of returning None.

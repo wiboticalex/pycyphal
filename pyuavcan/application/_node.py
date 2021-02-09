@@ -3,7 +3,7 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Union
+from typing import Union, Callable, Tuple
 from pathlib import Path
 import logging
 import uavcan.node
@@ -33,7 +33,7 @@ class Node:
     - :class:`HeartbeatPublisher` (see :attr:`heartbeat_publisher`).
 
     - :class:`register.Repository` (see :attr:`registry`) along with the implementation of the standard
-    register network service ``uavcan.register``.
+      register network service ``uavcan.register``.
 
     Additionally, if enabled via the corresponding constructor arguments, optional application-level function
     implementations are instantiated as described in the constructor documentation.
@@ -43,8 +43,9 @@ class Node:
         self,
         presentation: pyuavcan.presentation.Presentation,
         info: NodeInfo,
+        registry_file: Union[None, str, Path] = None,
         *,
-        register_file: Union[None, str, Path] = None,
+        parse_environment_variables: bool = True,
         with_diagnostic_subscriber: bool = False,
     ):
         """
@@ -54,6 +55,17 @@ class Node:
 
         :param info: The info structure is sent as a response to requests of type ``uavcan.node.GetInfo``;
             the corresponding server instance is established and run by the node class automatically.
+
+        :param registry_file: Path to the SQLite file containing the register database; or, in other words,
+            the configuration file of this application and node.
+            If not provided (default), the registers of this instance will be stored in-memory,
+            meaning that no persistent configuration will be stored anywhere.
+            If path is provided but the file does not exist, it will be created automatically.
+            See :attr:`registry`, :meth:`create_register`.
+
+        :param parse_environment_variables: If True (default), the registry will be automatically updated/populated
+            based on the register values passed via environment variables.
+            See :func:`register.parse_environment_variables`.
 
         :param with_diagnostic_subscriber: If True, an instance of
             :class:`pyuavcan.application.diagnostic.DiagnosticSubscriber` will be constructed to channel
@@ -67,10 +79,15 @@ class Node:
         from .register.backend.sqlite import SQLiteBackend
         from .register.backend.dynamic import DynamicBackend
 
-        self._reg_db = SQLiteBackend(register_file or "")
+        self._reg_db = SQLiteBackend(registry_file or "")
         self._reg_dynamic = DynamicBackend()
         self._registry = register.Registry([self._reg_db, self._reg_dynamic])
         self._reg_server = register.Server(self._presentation, self._registry)
+
+        if parse_environment_variables:
+            for name, value in register.parse_environment_variables():
+                _logger.debug("%r: Register from envvar: %r %r", self, name, value)
+                self._reg_db.set(name, value)
 
         self._diagnostic_subscriber = DiagnosticSubscriber(self._presentation) if with_diagnostic_subscriber else None
         self._started = False
@@ -84,13 +101,48 @@ class Node:
     def registry(self) -> register.Registry:
         """
         Provides access to the local registry instance (see :class:`pyuavcan.application.register.Registry`).
-        The registry manages the UAVCAN registers as defined by the standard network service ``uavcan.register``.
+        The registry manages UAVCAN registers as defined by the standard network service ``uavcan.register``.
 
         The registers store the configuration parameters of the current application, both standard
         (like subject-IDs, service-IDs, transport configuration, the local node-ID, etc.)
         and application-specific ones.
         """
         return self._registry
+
+    def create_register(
+        self,
+        name: str,
+        value_or_getter_or_getter_setter: Union[
+            register.Value,
+            register.ValueProxy,
+            Callable[[], Union[register.Value, register.ValueProxy]],
+            Tuple[
+                Callable[[], Union[register.Value, register.ValueProxy]],
+                Callable[[register.Value], None],
+            ],
+        ],
+        overwrite: bool = False,
+    ) -> None:
+        if not overwrite and self.registry.get(name) is not None:
+            _logger.debug("%r: Register %r already exists and overwrite not enabled", self, name)
+            return
+
+        def unwrap(x: Union[register.Value, register.ValueProxy]) -> register.Value:
+            if isinstance(x, register.ValueProxy):
+                return x.value
+            return x
+
+        v = value_or_getter_or_getter_setter
+        _logger.debug("%r: Create register %r = %r", self, name, v)
+        if isinstance(v, (register.Value, register.ValueProxy)):
+            self._reg_db.set(name, unwrap(v))
+        elif callable(v):
+            self._reg_dynamic.register(name, lambda: unwrap(v()))  # type: ignore
+        elif isinstance(v, tuple) and len(v) == 2 and all(map(callable, v)):
+            g, s = v
+            self._reg_dynamic.register(name, lambda: unwrap(g()), s)
+        else:  # pragma: no cover
+            raise TypeError(f"Invalid register creation argument: {v}")
 
     @property
     def info(self) -> NodeInfo:

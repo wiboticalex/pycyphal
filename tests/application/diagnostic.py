@@ -20,6 +20,7 @@ async def _unittest_slow_diagnostic(
     from uavcan.time import SynchronizedTimestamp_1_0
 
     assert generated_packages
+    asyncio.get_running_loop().slow_callback_duration = 1.0
 
     pres = Presentation(LoopbackTransport(2222))
     pub = pres.make_publisher_with_fixed_subject_id(diagnostic.Record)

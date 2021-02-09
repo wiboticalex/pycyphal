@@ -26,6 +26,7 @@ from ._value import ValueConversionError as ValueConversionError
 from . import backend as backend
 
 from ._registry import Registry as Registry
+from ._registry import ValueProxyWithFlags as ValueProxyWithFlags
 from ._registry import MissingRegisterError as MissingRegisterError
 
 from ._env_var import parse_environment_variables as parse_environment_variables
