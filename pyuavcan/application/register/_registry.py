@@ -39,16 +39,16 @@ class ValueWithFlags(ValueProxy):
         return self._persistent
 
     def __repr__(self) -> str:
-        return pyuavcan.util.repr_attributes(self, self.value, mutable=self.mutable, persistent=self.persistent)
+        return pyuavcan.util.repr_attributes(self, repr(self.value), mutable=self.mutable, persistent=self.persistent)
 
 
-class Repository:
+class Registry:
     """
-    The register repository is the main access point for the application to its registers.
+    The registry (register repository) is the main access point for the application to its registers.
     It is a facade that provides user-friendly API on top of multiple underlying register backends
     (see :class:`backend.Backend`).
 
-    Here's how to use it. First, we need backends to set up the repository on top of:
+    Here's how to use it. First, we need backends to set up the registry on top of:
 
     >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
     >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
@@ -58,18 +58,18 @@ class Repository:
     >>> b1 = DynamicBackend()
     >>> b1.register("b", lambda: Value())
 
-    We can modify backends and add additional ones after the repository is set up --
+    We can modify backends and add additional ones after the registry is set up --
     it doesn't keep any internal state and is fully transparent.
     Moving on:
 
-    >>> r = Repository([b0, b1])
+    >>> r = Registry([b0, b1])
     >>> r.keys()                        # Sorted lexicographically per backend.
     ['a', 'c', 'b']
-    >>> Repository([b1, b0]).keys()     # Notice how the order is affected.
+    >>> Registry([b1, b0]).keys()       # Notice how the order is affected.
     ['b', 'a', 'c']
     >>> r.get_name_at_index(0), r.get_name_at_index(1), r.get_name_at_index(2), r.get_name_at_index(3)
     ('a', 'c', 'b', None)
-    >>> list(r)                         # The repository keys are iterable.
+    >>> list(r)                         # The registry keys are iterable.
     ['a', 'c', 'b']
     >>> len(r)                          # The number of registers.
     3
@@ -99,7 +99,7 @@ class Repository:
     (True, False)
     >>> r["foo"].ints                               # The alternative way that mimics dict.
     [1, 0]
-    >>> r.set("foo", [True, False, False])          # Dimensionality mismatch. # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> r["foo"] = True, False, False               # Dimensionality mismatch. # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
     ...
     ValueConversionError: ...
@@ -115,31 +115,14 @@ class Repository:
     >>> r["bar"].floats
     [0.0, 1.0, 1.0]
 
-    Method :meth:`access` implements the logic of ``uavcan.register.Access``:
-
-    >>> from pyuavcan.application.register import String
-    >>> bool(r.access("baz", Value()).value.empty)                      # No such register.
-    True
-    >>> v = r.access("foo", Value())                                    # Read access.
-    >>> (v.bools, v.mutable, v.persistent)
-    ([True, False], True, False)
-    >>> v = r.access("bar", Value())                                    # Read access.
-    >>> (v.bools, v.mutable, v.persistent)
-    ([False, True, True], True, False)
-    >>> r.access("foo", Value(bit=Bit([False, True]))).bools            # Write, success.
-    [False, True]
-    >>> r.access("foo", Value(string=String("Hello"))).bools            # Write, bad type ignored, no change.
-    [False, True]
-    >>> r.access("bar", Value(bit=Bit([True, False, False]))).bools     # Write, success.
-    [True, False, False]
-    >>> r.access("bar.ro", Value(bit=Bit([True, True, True]))).bools    # Write, immutable register, no change.
-    [True, False, False]
-
-    Deleting registers (every backend where matching names are found is affected):
+    Deleting registers using wildcard matching (every backend where matching names are found is affected):
 
     >>> r.keys()
     ['a', 'c', 'foo', 'b', 'bar', 'bar.ro']
-    >>> r.delete("*a*")
+    >>> r.delete("bar*")
+    >>> r.keys()
+    ['a', 'c', 'foo', 'b']
+    >>> del r["*a*"]  # This is an alias for delete()
     >>> r.keys()
     ['c', 'foo', 'b']
     """
@@ -154,9 +137,9 @@ class Repository:
 
     def bind(self, b: backend.Backend) -> None:
         """
-        Connect a new backend to this repository after the existing backends.
+        Connect a new backend to this registry after the existing backends.
         Count, keys, and ordering will be invalidated.
-        If a register exists in more than one repository, only the first copy will be used;
+        If a register exists in more than one registry, only the first copy will be used;
         however, the count will include all redundant registers.
         """
         self._backends.append(b)
@@ -186,20 +169,21 @@ class Repository:
         except LookupError:
             return None
 
-    def get(self, name: str) -> Optional[ValueProxy]:
+    def get(self, name: str) -> Optional[ValueWithFlags]:
         """
         :returns: :class:`ValueProxy` if exists, otherwise None.
         """
         for b in self._backends:
             ent = b.get(name)
             if ent is not None:
-                return ValueProxy(ent.value)
+                return ValueWithFlags(ent.value, mutable=ent.mutable, persistent=b.persistent)
         return None
 
     def set(self, name: str, value: RelaxedValue) -> None:
         """
         Set if the register exists and the type of the value is matching or can be converted to the register's type.
         The mutability flag may be ignored depending on which backend the register is stored at.
+        The conversion is implemented by :meth:`ValueProxy.assign`.
 
         :raises:
             :class:`MissingRegisterError` (subclass of :class:`KeyError`) if the register does not exist.
@@ -215,33 +199,6 @@ class Repository:
         else:
             raise MissingRegisterError(name)
 
-    def access(self, name: str, value: Value) -> ValueWithFlags:
-        """
-        Perform the set/get transaction as defined by the RPC-service ``uavcan.register.Access``.
-        No exceptions are raised. This method is intended for use with the register RPC-service implementations
-        (essentially, this method is the entire implementation, just bind it to the session and you're all set).
-
-        If write is requested (that is, the value argument is not ``empty``),
-        implicit type conversion is performed by invoking :meth:`ValueProxy.assign`.
-        This behavior ensures that the service client may write the register correctly even if the request
-        object is using a different type.
-        For instance, it is possible to assign a register of type ``bool[x]`` from ``real64[x]``.
-        """
-        for b in self._backends:
-            e = b.get(name)
-            if e is not None and e.mutable and not value.empty:
-                c = ValueProxy(e.value)
-                try:
-                    c.assign(value)
-                except ValueError:
-                    pass
-                else:
-                    b.set(name, c.value)
-                    e = b.get(name)
-            if e is not None:
-                return ValueWithFlags(e.value, mutable=e.mutable, persistent=b.persistent)
-        return ValueWithFlags(Value(), False, False)
-
     def delete(self, wildcard: str) -> None:
         """
         Remove registers that match the specified wildcard from all backends. Matching is case-sensitive.
@@ -252,15 +209,30 @@ class Repository:
             _logger.debug("%r: Deleting %d registers matching %r from %r: %r", self, len(names), wildcard, b, names)
             b.delete(names)
 
-    def __getitem__(self, item: str) -> ValueProxy:
+    def __getitem__(self, key: str) -> ValueProxy:
         """
         Like :meth:`get`, but if the register is missing it raises :class:`MissingRegisterError`
         (subclass of :class:`KeyError`) instead of returning None.
         """
-        e = self.get(item)
+        _ensure_name(key)
+        e = self.get(key)
         if e is None:
-            raise MissingRegisterError(item)
+            raise MissingRegisterError(key)
         return e
+
+    def __setitem__(self, key: str, value: RelaxedValue) -> None:
+        """
+        See :meth:`set`.
+        """
+        _ensure_name(key)
+        self.set(key, value)
+
+    def __delitem__(self, key: str) -> None:
+        """
+        See :meth:`delete`. If no matching keys are found, no exception is raised.
+        """
+        _ensure_name(key)
+        self.delete(key)
 
     def __iter__(self) -> Iterator[str]:
         """
@@ -276,6 +248,11 @@ class Repository:
 
     def __repr__(self) -> str:
         return pyuavcan.util.repr_attributes(self, self._backends)
+
+
+def _ensure_name(name: str) -> None:
+    if not isinstance(name, str):
+        raise TypeError(f"Register names are strings, not {type(name)}")
 
 
 _logger = logging.getLogger(__name__)

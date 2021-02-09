@@ -25,7 +25,9 @@ from ._value import ValueConversionError as ValueConversionError
 
 from . import backend as backend
 
-from ._repository import Repository as Repository
-from ._repository import MissingRegisterError as MissingRegisterError
+from ._registry import Registry as Registry
+from ._registry import MissingRegisterError as MissingRegisterError
 
 from ._env_var import parse_environment_variables as parse_environment_variables
+
+from ._server import Server as Server

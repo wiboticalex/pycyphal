@@ -263,7 +263,7 @@ def _do_convert(to: Value, s: Value) -> Optional[Value]:
 
 
 def _strictify(s: RelaxedValue) -> Value:
-    # pylint: disable=multiple-statements
+    # pylint: disable=multiple-statements,too-many-branches
     # fmt: off
     if isinstance(s, Value):                return s
     if isinstance(s, ValueProxy):           return s.value

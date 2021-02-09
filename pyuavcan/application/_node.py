@@ -3,12 +3,14 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
+from typing import Union
+from pathlib import Path
 import logging
 import uavcan.node
 import pyuavcan
-import pyuavcan.application
-import pyuavcan.application.heartbeat_publisher
-import pyuavcan.application.diagnostic
+from .heartbeat_publisher import HeartbeatPublisher
+from .diagnostic import DiagnosticSubscriber
+from . import register
 
 
 NodeInfo = uavcan.node.GetInfo_1_0.Response
@@ -28,7 +30,10 @@ class Node:
 
     This class automatically instantiates the following application-level function implementations:
 
-    - :class:`pyuavcan.application.heartbeat_publisher.HeartbeatPublisher` (see :attr:`heartbeat_publisher`).
+    - :class:`HeartbeatPublisher` (see :attr:`heartbeat_publisher`).
+
+    - :class:`register.Repository` (see :attr:`registry`) along with the implementation of the standard
+    register network service ``uavcan.register``.
 
     Additionally, if enabled via the corresponding constructor arguments, optional application-level function
     implementations are instantiated as described in the constructor documentation.
@@ -38,6 +43,8 @@ class Node:
         self,
         presentation: pyuavcan.presentation.Presentation,
         info: NodeInfo,
+        *,
+        register_file: Union[None, str, Path] = None,
         with_diagnostic_subscriber: bool = False,
     ):
         """
@@ -54,15 +61,18 @@ class Node:
         """
         self._presentation = presentation
         self._info = info
-        self._heartbeat_publisher = pyuavcan.application.heartbeat_publisher.HeartbeatPublisher(self._presentation)
+        self._heartbeat_publisher = HeartbeatPublisher(self._presentation)
         self._srv_info = self._presentation.get_server_with_fixed_service_id(uavcan.node.GetInfo_1_0)
 
-        self._diagnostic_subscriber = (
-            pyuavcan.application.diagnostic.DiagnosticSubscriber(self._presentation)
-            if with_diagnostic_subscriber
-            else None
-        )
+        from .register.backend.sqlite import SQLiteBackend
+        from .register.backend.dynamic import DynamicBackend
 
+        self._reg_db = SQLiteBackend(register_file or "")
+        self._reg_dynamic = DynamicBackend()
+        self._registry = register.Registry([self._reg_db, self._reg_dynamic])
+        self._reg_server = register.Server(self._presentation, self._registry)
+
+        self._diagnostic_subscriber = DiagnosticSubscriber(self._presentation) if with_diagnostic_subscriber else None
         self._started = False
 
     @property
@@ -71,12 +81,24 @@ class Node:
         return self._presentation
 
     @property
+    def registry(self) -> register.Registry:
+        """
+        Provides access to the local registry instance (see :class:`pyuavcan.application.register.Registry`).
+        The registry manages the UAVCAN registers as defined by the standard network service ``uavcan.register``.
+
+        The registers store the configuration parameters of the current application, both standard
+        (like subject-IDs, service-IDs, transport configuration, the local node-ID, etc.)
+        and application-specific ones.
+        """
+        return self._registry
+
+    @property
     def info(self) -> NodeInfo:
         """Provides access to the local node info structure. See :class:`pyuavcan.application.NodeInfo`."""
         return self._info
 
     @property
-    def heartbeat_publisher(self) -> pyuavcan.application.heartbeat_publisher.HeartbeatPublisher:
+    def heartbeat_publisher(self) -> HeartbeatPublisher:
         """Provides access to the heartbeat publisher instance of this node."""
         return self._heartbeat_publisher
 
@@ -89,6 +111,7 @@ class Node:
         if not self._started:
             self._srv_info.serve_in_background(self._handle_get_info_request)
             self._heartbeat_publisher.start()
+            self._reg_server.start()
             if self._diagnostic_subscriber is not None:
                 self._diagnostic_subscriber.start()
             self._started = True
@@ -101,6 +124,8 @@ class Node:
         try:
             self._heartbeat_publisher.close()
             self._srv_info.close()
+            self._reg_server.close()
+            self._registry.close()
             if self._diagnostic_subscriber is not None:
                 self._diagnostic_subscriber.close()
         finally:
@@ -114,5 +139,9 @@ class Node:
 
     def __repr__(self) -> str:
         return pyuavcan.util.repr_attributes(
-            self, info=self._info, heartbeat=self._heartbeat_publisher.make_message(), presentation=self._presentation
+            self,
+            info=self._info,
+            heartbeat=self._heartbeat_publisher.make_message(),
+            registry=self.registry,
+            presentation=self._presentation,
         )
