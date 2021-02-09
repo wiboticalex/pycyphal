@@ -7,10 +7,16 @@ This convenience module implements forwarding between the standard messages ``ua
 over the standard subject-ID and the local logging facilities.
 """
 
+import sys
+import asyncio
 import logging
+from typing import Optional
 from uavcan.diagnostic import Record_1_1 as Record
 from uavcan.diagnostic import Severity_1_0 as Severity
 import pyuavcan
+
+
+__all__ = ["DiagnosticSubscriber", "DiagnosticPublisher", "Record", "Severity"]
 
 
 _logger = logging.getLogger(__name__)
@@ -78,3 +84,106 @@ class DiagnosticSubscriber:
         )
         level = self._LEVEL_MAP.get(msg.severity.value, logging.CRITICAL)
         _logger.log(level, log_text)
+
+
+class DiagnosticPublisher(logging.Handler):
+    """
+    This is an implementation of :class:`logging.Handler` that forwards all log messages via the standard
+    diagnostics subject of UAVCAN.
+    Log messages that are too long to fit into a UAVCAN Record object are truncated.
+    Log messages emitted by PyUAVCAN itself may be dropped to avoid infinite recursion.
+
+    Here's a usage example. Set up test rigging:
+
+    >>> from asyncio import get_event_loop
+    >>> from pyuavcan.transport.loopback import LoopbackTransport
+    >>> from pyuavcan.presentation import Presentation
+    >>> pres = Presentation(LoopbackTransport(1))
+
+    Instantiate publisher and install it with the logging system:
+
+    >>> diagnostic_pub = DiagnosticPublisher(pres.make_publisher_with_fixed_subject_id(Record), level=logging.INFO)
+    >>> logging.root.addHandler(diagnostic_pub)
+    >>> diagnostic_pub.timestamping_enabled = True  # This is only allowed if the UAVCAN network uses the wall clock.
+    >>> diagnostic_pub.timestamping_enabled
+    True
+
+    Test it:
+
+    >>> sub = pres.make_subscriber_with_fixed_subject_id(Record)
+    >>> logging.info('Test message')
+    >>> msg, _ = get_event_loop().run_until_complete(sub.receive_for(1.0))
+    >>> msg.text.tobytes().decode()
+    'Test message'
+    >>> msg.severity.value == Severity.INFO     # The log level is mapped automatically.
+    True
+
+    Don't forget to remove it afterwards:
+
+    >>> logging.root.removeHandler(diagnostic_pub)
+    >>> diagnostic_pub.close()
+    """
+
+    def __init__(self, publisher: pyuavcan.presentation.Publisher[Record], level: int = logging.WARNING) -> None:
+        super().__init__(level)
+        self._pub = publisher
+        self._fut: Optional[asyncio.Future[None]] = None
+        self._forward_timestamp = False
+
+    @property
+    def timestamping_enabled(self) -> bool:
+        """
+        If True, the publisher will be setting the field ``timestamp`` of the published log messages to
+        :attr:`logging.LogRecord.created` (with the appropriate unit conversion).
+        If False (default), published messages will not be timestamped at all.
+        """
+        return self._forward_timestamp
+
+    @timestamping_enabled.setter
+    def timestamping_enabled(self, value: bool) -> None:
+        self._forward_timestamp = bool(value)
+
+    def close(self) -> None:
+        self._pub.close()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Drop all low-severity messages from PyUAVCAN to prevent possible positive feedback through the logging system.
+        if record.module.startswith(pyuavcan.__name__) and record.levelno < logging.WARNING:
+            return
+
+        # Further, unconditionally drop all messages while publishing is in progress for the same reason.
+        # This logic may need to be reviewed later.
+        if self._fut is not None and self._fut.done():
+            self._fut.result()
+            self._fut = None
+
+        dcs_rec = DiagnosticPublisher.log_record_to_diagnostic_message(record, self._forward_timestamp)
+        if self._fut is None:
+            self._fut = asyncio.ensure_future(self._publish(dcs_rec))
+        else:
+            print(self, "DROPPED", dcs_rec, file=sys.stderr)  # pragma: no cover
+
+    async def _publish(self, record: Record) -> None:
+        try:
+            if not await self._pub.publish(record):
+                print(self, "TIMEOUT", record, file=sys.stderr)  # pragma: no cover
+        except Exception as ex:
+            print(self, "ERROR", ex.__class__.__name__, ex, file=sys.stderr)  # pragma: no cover
+
+    @staticmethod
+    def log_record_to_diagnostic_message(record: logging.LogRecord, use_timestamp: bool) -> Record:
+        from uavcan.time import SynchronizedTimestamp_1_0 as SynchronizedTimestamp
+
+        ts: Optional[SynchronizedTimestamp] = None
+        if use_timestamp:
+            ts = SynchronizedTimestamp(microsecond=int(record.created * 1e6))
+
+        # The magic severity conversion formula is found by a trivial linear regression:
+        #   Fit[data, {1, x}, {{0, 0}, {10, 1}, {20, 2}, {30, 4}, {40, 5}, {50, 6}}]
+        sev = min(7, round(-0.14285714285714374 + 0.12571428571428572 * record.levelno))
+
+        text = record.getMessage()[:255]  # TODO: this is crude; expose array lengths from DSDL.
+        return Record(timestamp=ts, severity=Severity(sev), text=text)
+
+    def __repr__(self) -> str:
+        return pyuavcan.util.repr_attributes(self, self._pub)
