@@ -3,7 +3,7 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Union, Callable, Tuple, Type, TypeVar
+from typing import Union, Callable, Tuple, Type, TypeVar, Dict, Optional, List
 from pathlib import Path
 import re
 import logging
@@ -41,9 +41,9 @@ class Node:
         self,
         presentation: Presentation,
         info: NodeInfo,
-        registry_file: Union[None, str, Path] = None,
+        register_file: Union[None, str, Path] = None,
         *,
-        parse_environment_variables: bool = True,
+        environment_variables: Optional[Dict[str, str]] = None,
     ):
         """
         :param presentation:
@@ -55,18 +55,21 @@ class Node:
             The info structure is sent as a response to requests of type ``uavcan.node.GetInfo``;
             the corresponding server instance is established and run by the node class automatically.
 
-        :param registry_file:
+        :param register_file:
             Path to the SQLite file containing the register database; or, in other words,
-            the configuration file of this application and node.
+            the configuration file of this application/node.
             If not provided (default), the registers of this instance will be stored in-memory,
-            meaning that no persistent configuration will be stored anywhere.
+            meaning that no persistent configuration will be kept anywhere.
             If path is provided but the file does not exist, it will be created automatically.
             See :attr:`registry`, :meth:`create_register`.
 
-        :param parse_environment_variables:
-            If True, the register values passed via environment variables will be automatically parsed and for each
+        :param environment_variables:
+            The register values passed via environment variables will be automatically parsed and for each
             register the method :meth:`create_register` will be invoked (with overwrite flag set).
             See :func:`register.parse_environment_variables` for additional details.
+
+            If None (default), the variables are taken from :attr:`os.environ`.
+            To disable variable parsing, pass an empty dict here.
         """
         self._presentation = presentation
         self._info = info
@@ -76,17 +79,15 @@ class Node:
         from .register.backend.sqlite import SQLiteBackend
         from .register.backend.dynamic import DynamicBackend
 
-        self._reg_db = SQLiteBackend(registry_file or "")
+        self._reg_db = SQLiteBackend(register_file or "")
         self._reg_dynamic = DynamicBackend()
         self._registry = register.Registry([self._reg_db, self._reg_dynamic])
         self._reg_server = register.RegisterServer(self._presentation, self._registry)
 
         self._started = False
 
-        if parse_environment_variables:
-            for name, value in register.parse_environment_variables():
-                _logger.debug("%r: Register from envvar: %r %r", self, name, value)
-                self.create_register(name, value, overwrite=True)
+        for name, value in register.parse_environment_variables(environment_variables):
+            self.create_register(name, value, overwrite=True)
 
     @property
     def presentation(self) -> Presentation:
@@ -297,3 +298,56 @@ class Node:
             registry=self.registry,
             presentation=self._presentation,
         )
+
+    @staticmethod
+    def from_registers(
+        info: NodeInfo,
+        register_file: Union[None, str, Path] = None,
+        environment_variables: Optional[Dict[str, str]] = None,
+    ) -> Node:
+        from .register.backend.sqlite import SQLiteBackend
+
+        db = SQLiteBackend(register_file or "")
+        registry = register.Registry([db])
+        try:
+            for name, value in register.parse_environment_variables(environment_variables):
+                db.set(name, value)
+            transport = construct_transport(registry)
+        finally:
+            registry.close()
+
+        if transport is None:
+            raise register.MissingRegisterError(
+                f"The available registers do not encode a valid transport configuration. "
+                f"For reference, the names of available registers are as follows: "
+                f"{list(registry)}"
+            )
+
+        return Node(
+            Presentation(transport),
+            info,
+            register_file,
+            environment_variables=environment_variables,
+        )
+
+
+def construct_transport(registry: register.Registry) -> Optional[pyuavcan.transport.Transport]:
+    try:
+        node_id: Optional[int] = int(registry["uavcan.node.id"])
+    except register.MissingRegisterError:
+        node_id = None
+
+    trs: List[pyuavcan.transport.Transport] = []
+    # TODO parse the registers
+
+    if len(trs) == 0:
+        return None
+    if len(trs) == 1:
+        return trs[1]
+
+    from pyuavcan.transport.redundant import RedundantTransport
+
+    red = RedundantTransport()
+    for tr in trs:
+        red.attach_inferior(tr)
+    return red
