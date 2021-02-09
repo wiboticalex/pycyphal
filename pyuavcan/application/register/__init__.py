@@ -31,4 +31,4 @@ from ._registry import MissingRegisterError as MissingRegisterError
 
 from ._env_var import parse_environment_variables as parse_environment_variables
 
-from ._server import Server as Server
+from ._server import RegisterServer as RegisterServer

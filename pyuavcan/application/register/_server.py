@@ -12,7 +12,7 @@ from uavcan.register import Name_1_0 as Name
 from . import Registry, ValueConversionError, MissingRegisterError
 
 
-class Server:
+class RegisterServer:
     """
     Implementation of the standard network service ``uavcan.register``; specifically, List and Access.
 
@@ -40,7 +40,7 @@ class Server:
 
     Instantiate and launch the server:
 
-    >>> srv = Server(pres, registry)
+    >>> srv = RegisterServer(pres, registry)
     >>> srv.start()
 
     It is now running using background async tasks. List registers:
