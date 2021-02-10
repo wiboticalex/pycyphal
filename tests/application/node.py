@@ -31,7 +31,7 @@ async def _unittest_slow_node(generated_packages: typing.List[pyuavcan.dsdl.Gene
             software_version=Version_1_0(*pyuavcan.__version_info__[:2]),
             name="org.uavcan.pyuavcan.test.node",
         )
-        node = Node(pres, info, with_diagnostic_subscriber=True)
+        node = Node(pres, info)
         print("node:", node)
         assert node.presentation is pres
         node.start()

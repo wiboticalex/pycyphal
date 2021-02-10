@@ -153,7 +153,7 @@ async def _unittest_slow_demo_app(
             software_version=uavcan.node.Version_1_0(*pyuavcan.__version_info__[:2]),
             name="org.uavcan.pyuavcan.test.demo_app",
         )
-        node = pyuavcan.application.Node(presentation, local_node_info, with_diagnostic_subscriber=True)
+        node = pyuavcan.application.Node(presentation, local_node_info)
 
         # Construct the ports we will be using to interact with the demo application.
         sub_heartbeat = node.presentation.make_subscriber_with_fixed_subject_id(uavcan.node.Heartbeat_1_0)
