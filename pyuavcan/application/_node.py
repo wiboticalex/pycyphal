@@ -3,9 +3,8 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Union, Callable, Tuple, Type, TypeVar, Dict, Optional, List
+from typing import Union, Callable, Tuple, Type, TypeVar, Dict, Optional, Iterator
 from pathlib import Path
-import re
 import logging
 import uavcan.node
 import pyuavcan
@@ -18,8 +17,6 @@ NodeInfo = uavcan.node.GetInfo_1_0.Response
 
 MessageClass = TypeVar("MessageClass", bound=pyuavcan.dsdl.CompositeObject)
 ServiceClass = TypeVar("ServiceClass", bound=pyuavcan.dsdl.ServiceObject)
-
-PORT_NAME_PATTERN = re.compile(r"[a-z_][a-z0-9_.]*[a-z0-9]")
 
 
 _logger = logging.getLogger(__name__)
@@ -226,8 +223,6 @@ class Node:
     def _resolve_port(self, dtype: Type[pyuavcan.dsdl.CompositeObject], kind: str, name: str) -> int:
         model = pyuavcan.dsdl.get_model(dtype)
         name = name or str(model).lower()  # Convenience tweak: make the port name default to the data type name.
-        if not PORT_NAME_PATTERN.match(name):
-            raise ValueError(f"Port name {name!r} does not match '{PORT_NAME_PATTERN.pattern}'")
         id_register_name = f"uavcan.{kind}.{name}.id"
         try:
             port_id = int(self.registry[id_register_name])
@@ -312,7 +307,7 @@ class Node:
         try:
             for name, value in register.parse_environment_variables(environment_variables):
                 db.set(name, value)
-            transport = construct_transport(registry)
+            transport = construct_transport_from_registers(registry)
         finally:
             registry.close()
 
@@ -331,23 +326,93 @@ class Node:
         )
 
 
-def construct_transport(registry: register.Registry) -> Optional[pyuavcan.transport.Transport]:
-    try:
-        node_id: Optional[int] = int(registry["uavcan.node.id"])
-    except register.MissingRegisterError:
-        node_id = None
+def construct_transport_from_registers(registry: register.Registry) -> Optional[pyuavcan.transport.Transport]:
+    """
+    Parses the supplied registers and constructs a transport instance out of that.
+    If more than one transport is specified, they are automatically merged under one RedundantTransport instance.
+    If no transports are specified, None is returned.
 
-    trs: List[pyuavcan.transport.Transport] = []
-    # TODO parse the registers
+    Transport implementation subpackages are only imported if their construction is requested.
+    This means that it is not necessary to have all transport-specific dependencies installed to use this factory.
+    """
+    # noinspection PyPep8Naming
+    Ty = TypeVar("Ty", int, float, bool, str, bytes)
 
-    if len(trs) == 0:
+    def get(name: str, ty: Type[Ty]) -> Optional[Ty]:
+        try:
+            return ty(registry[name])
+        except register.MissingRegisterError:
+            return None
+
+    node_id = get("uavcan.node.id", int)
+
+    def udp() -> Iterator[pyuavcan.transport.Transport]:
+        try:
+            ip_list = str(registry["uavcan.udp.ip"]).split()
+        except register.MissingRegisterError:
+            return
+
+        from pyuavcan.transport.udp import UDPTransport
+
+        mtu = get("uavcan.udp.mtu", int) or min(UDPTransport.VALID_MTU_RANGE)
+        srv_mult = int(get("uavcan.udp.duplicate_service_transfers", bool) or False) + 1
+        for ip in ip_list:
+            yield UDPTransport(ip, node_id, mtu=mtu, service_transfer_multiplier=srv_mult)
+
+    def serial() -> Iterator[pyuavcan.transport.Transport]:
+        try:
+            port_list = str(registry["uavcan.serial.port"]).split()
+        except register.MissingRegisterError:
+            return
+
+        from pyuavcan.transport.serial import SerialTransport
+
+        srv_mult = int(get("uavcan.serial.duplicate_service_transfers", bool) or False) + 1
+        baudrate = get("uavcan.serial.baudrate", int)
+        for port in port_list:
+            yield SerialTransport(port, node_id, service_transfer_multiplier=srv_mult, baudrate=baudrate)
+
+    def can() -> Iterator[pyuavcan.transport.Transport]:
+        try:
+            iface_list = str(registry["uavcan.can.iface"]).split()
+        except register.MissingRegisterError:
+            return
+
+        from pyuavcan.transport.can import CANTransport
+
+        reg_mtu = "uavcan.can.mtu"
+        reg_bitrate = "uavcan.can.bitrate"
+        mtu = get(reg_mtu, int)
+        bitrate: Union[int, Tuple[int, int]]
+        try:
+            bitrate_list = registry[reg_bitrate].ints
+        except register.MissingRegisterError:
+            bitrate = (1_000_000, 4_000_000) if mtu is None or mtu > 8 else 1_000_000
+        else:
+            bitrate = (bitrate_list[0], bitrate_list[1]) if len(bitrate_list) > 1 else bitrate_list[0]
+
+        for iface in iface_list:
+            media: pyuavcan.transport.can.media.Media
+            if iface.lower().startswith("socketcan:"):
+                from pyuavcan.transport.can.media.socketcan import SocketCANMedia
+
+                mtu = mtu or (8 if isinstance(bitrate, int) else 64)
+                media = SocketCANMedia(iface.split(":")[-1], mtu=mtu)
+            else:
+                from pyuavcan.transport.can.media.pythoncan import PythonCANMedia
+
+                media = PythonCANMedia(iface, bitrate, mtu)
+            yield CANTransport(media, node_id)
+
+    transports = *udp(), *serial(), *can()
+    if len(transports) == 0:
         return None
-    if len(trs) == 1:
-        return trs[1]
+    if len(transports) == 1:
+        return transports[0]
 
     from pyuavcan.transport.redundant import RedundantTransport
 
     red = RedundantTransport()
-    for tr in trs:
+    for tr in transports:
         red.attach_inferior(tr)
     return red
