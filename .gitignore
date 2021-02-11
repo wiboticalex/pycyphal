@@ -46,6 +46,7 @@ coverage.xml
 .*generated
 .*compiled
 *.cache
+*.db
 
 .scannerwork
 

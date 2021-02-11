@@ -70,8 +70,7 @@ class Node:
         """
         self._presentation = presentation
         self._info = info
-        self._heartbeat_publisher = heartbeat_publisher.HeartbeatPublisher(self._presentation)
-        self._srv_info = self._presentation.get_server_with_fixed_service_id(uavcan.node.GetInfo_1_0)
+        self._started = False
 
         from .register.backend.sqlite import SQLiteBackend
         from .register.backend.dynamic import DynamicBackend
@@ -80,11 +79,11 @@ class Node:
         self._reg_dynamic = DynamicBackend()
         self._registry = register.Registry([self._reg_db, self._reg_dynamic])
         self._reg_server = register.RegisterServer(self._presentation, self._registry)
-
-        self._started = False
-
         for name, value in register.parse_environment_variables(environment_variables):
             self.create_register(name, value, overwrite=True)
+
+        self._heartbeat_publisher = heartbeat_publisher.HeartbeatPublisher(self._presentation)
+        self._srv_info = self.get_server(uavcan.node.GetInfo_1_0)
 
     @property
     def presentation(self) -> Presentation:
@@ -304,6 +303,8 @@ class Node:
         info: NodeInfo,
         register_file: Union[None, str, Path] = None,
         environment_variables: Optional[Dict[str, str]] = None,
+        *,
+        require_redundant_transport: bool = False,
     ) -> Node:
         from .register.backend.sqlite import SQLiteBackend
 
@@ -312,8 +313,10 @@ class Node:
         try:
             for name, value in register.parse_environment_variables(environment_variables):
                 db.set(name, value)
-            transport = construct_transport_from_registers(registry)
-
+            transport = _construct_transport_from_registers(
+                registry,
+                require_redundant_transport=require_redundant_transport,
+            )
             return Node(
                 Presentation(transport),
                 info,
@@ -324,12 +327,11 @@ class Node:
             registry.close()
 
 
-def construct_transport_from_registers(registry: register.Registry) -> pyuavcan.transport.Transport:
-    """
-    Parses the supplied registers and constructs a RedundantTransport instance out of that.
-    Transport implementation subpackages are only imported if their construction is requested.
-    This means that it is not necessary to have all transport-specific dependencies installed to use this factory.
-    """
+def _construct_transport_from_registers(
+    registry: register.Registry,
+    *,
+    require_redundant_transport: bool,
+) -> pyuavcan.transport.Transport:
     # noinspection PyPep8Naming
     Ty = TypeVar("Ty", int, float, bool, str, bytes)
 
@@ -406,8 +408,14 @@ def construct_transport_from_registers(registry: register.Registry) -> pyuavcan.
             yield LoopbackTransport(node_id)
 
     transports = *udp(), *serial(), *can(), *loopback()
-    if len(transports) == 1:
-        return transports[0]
+    if not require_redundant_transport:
+        if not transports:
+            raise register.MissingRegisterError(
+                f"The available registers do not encode a valid transport configuration. "
+                f"For reference, the defined register names are: {list(registry)}"
+            )
+        if len(transports) == 1:
+            return transports[0]
 
     from pyuavcan.transport.redundant import RedundantTransport
 

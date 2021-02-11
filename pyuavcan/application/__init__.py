@@ -103,7 +103,7 @@ uavcan.node.Version.1.0(major=1, minor=0)
 Now, you are probably wondering, how come we just created a node without specifying which transport it should use,
 its node-ID, or even the subject-IDs for the publisher and the subscriber.
 Where did these values come from?
-They come from the ***registers***, as defined in the UAVCAN Specification
+They come from the *registers*, as defined in the UAVCAN Specification
 (chapter "Application layer", section "Register interface").
 Those familiar with ROS will find similarities with the services provided by the *ROS Parameter Server*.
 
@@ -157,6 +157,7 @@ There are two places:
 
 - **The register file** which contains a simple key-value database table.
   If the file does not exist (like at the first run), it is automatically created.
+  Multiple processes can use the same time concurrently.
   If no file location is provided when invoking :meth:`Node.from_registers`,
   the registry is stored in memory so that all state is lost when the node is closed.
 
@@ -180,11 +181,11 @@ When the environment variables are parsed, the values stored in the register fil
 In the following example we use a real register file and emulate some environment variables for demo purposes:
 
 >>> env = {
-...     "UAVCAN__NODE__ID__NATURAL16":                  "42",       # Name/type are defined by the UAVCAN Specification.
+...     "UAVCAN__NODE__ID__NATURAL16":     "42",            # The name and type are defined by the UAVCAN Specification.
 ...     "UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16": "6543",
-...     "UAVCAN__UDP__IP__STRING":      "127.63.0.0",               # Setup a heterogeneously redundant transport:
-...     "UAVCAN__SERIAL__PORT__STRING": "socket://localhost:50905", # UAVCAN/UDP + UAVCAN/serial.
-...     "M__MOTOR__INDUCTANCE_DQ__REAL64": "0.12 0.13",             # Application-specific parameters.
+...     "UAVCAN__UDP__IP__STRING":         "127.63.0.0",                # Setup a heterogeneously redundant transport:
+...     "UAVCAN__SERIAL__PORT__STRING":    "socket://localhost:50905",  # UAVCAN/UDP + UAVCAN/serial.
+...     "M__MOTOR__INDUCTANCE_DQ__REAL64": "0.12 0.13",                 # Application-specific parameters.
 ... }
 >>> node = pyuavcan.application.Node.from_registers(
 ...     node_info,
