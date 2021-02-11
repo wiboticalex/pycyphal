@@ -290,13 +290,7 @@ class Node:
         return self._info
 
     def __repr__(self) -> str:
-        return pyuavcan.util.repr_attributes(
-            self,
-            info=self._info,
-            heartbeat=self._heartbeat_publisher.make_message(),
-            registry=self.registry,
-            presentation=self._presentation,
-        )
+        return pyuavcan.util.repr_attributes(self, self._info, self._presentation, self.registry)
 
     @staticmethod
     def from_registers(

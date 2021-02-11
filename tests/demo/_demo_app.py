@@ -96,12 +96,7 @@ async def _unittest_slow_demo_app(
     generated_packages: typing.Iterator[typing.List[pyuavcan.dsdl.GeneratedPackageInfo]],
     parameters: typing.Tuple[bool, RunConfig],
 ) -> None:
-    """
-    This test is KINDA FRAGILE. It makes assumptions about particular data types and their port IDs and other
-    aspects of the demo application. If you change things in the demo, this test will likely break.
-    """
     import uavcan.node
-    import uavcan.diagnostic
     import uavcan.si.sample.temperature
     import sirius_cyber_corp
     import pyuavcan.application  # pylint: disable=redefined-outer-name

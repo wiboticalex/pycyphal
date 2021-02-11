@@ -16,17 +16,12 @@ import importlib
 import pyuavcan
 
 # We will need a directory to store the transcompiled Python packages in.
-#
-# It is perfectly acceptable to just use a random temp directory at every run, but the disadvantage of that approach
-# is that the packages will be recompiled from scratch every time the program is started, which may be undesirable.
-#
-# So in this example we use a fixed directory and shard its contents by the library version number.
+# In this example we use a fixed directory and shard its contents by the library version number.
 # The sharding ensures that we won't attempt to use a package compiled for an older library version with a newer one,
 # as they may be incompatible.
-#
-# Another sensible location for the transcompiled package directory is somewhere in the application data directory,
-# like "~/.my-app/dsdl/{pyuavcan.__version__}/"; or, for Windows: "%APPDATA%/MyApp/dsdl/{pyuavcan.__version__}/".
-dsdl_compiled_dir = pathlib.Path(f".dsdl.pyuavcan_v{pyuavcan.__version__}.compiled")
+# When packaging applications for distribution, consider including transcompiled packages rather than generating
+# them at runtime.
+dsdl_compiled_dir = pathlib.Path(f".dsdl.pyuavcan_{pyuavcan.__version__}.compiled")
 
 # We will need to import the packages once they are compiled, so we should update the module import look-up path set.
 # If you're using an IDE for development, add this path to its look-up set as well for code completion to work.
@@ -121,13 +116,6 @@ class DemoApplication:
         request: sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Request,
         metadata: pyuavcan.presentation.ServiceRequestMetadata,
     ) -> typing.Optional[sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Response]:
-        """
-        This is the request handler for the linear least squares service. The request is passed in along with its
-        metadata (the second argument); the response is returned back. We can also return None to instruct the library
-        that this request need not be answered (as if the request was never received).
-        If this handler raises an exception, it will be suppressed and logged, and no response will be sent back.
-        Notice that this is an async function.
-        """
         logging.info("Least squares request %s from node %d", request, metadata.client_node_id)
         sum_x = sum(map(lambda p: p.x, request.points))  # type: ignore
         sum_y = sum(map(lambda p: p.y, request.points))  # type: ignore
@@ -138,7 +126,7 @@ class DemoApplication:
             y_intercept = (sum_y - slope * sum_x) / len(request.points)
         except ZeroDivisionError:
             logging.error("There is no solution for input set %s (request metadata: %s)", request.points, metadata)
-            # We return None, no response will be sent back.
+            # If we return None (or throw), no response will be sent back.
             # This practice is actually discouraged; we do it here only to demonstrate the library capabilities.
             return None
         return sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Response(slope=slope, y_intercept=y_intercept)

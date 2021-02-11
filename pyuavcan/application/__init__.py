@@ -32,6 +32,10 @@ Node class
 The class :class:`pyuavcan.application.Node` models a UAVCAN node --- it is one of the main entities of the library.
 The application uses it to interact with the network: create publications/subscriptions, invoke and serve RPC-services.
 
+
+Constructing a node
+^^^^^^^^^^^^^^^^^^^
+
 ..  doctest::
     :hide:
 
@@ -39,6 +43,8 @@ The application uses it to interact with the network: create publications/subscr
     >>> os.environ["UAVCAN__NODE__ID__NATURAL16"]                   = "42"
     >>> os.environ["UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16"]  = "6543"
     >>> os.environ["UAVCAN__SUB__POSITION_SETPOINT__ID__NATURAL16"] = "6544"
+    >>> os.environ["UAVCAN__SRV__LEAST_SQUARES__ID__NATURAL16"]     = "123"
+    >>> os.environ["UAVCAN__CLN__LEAST_SQUARES__ID__NATURAL16"]     = "123"
     >>> os.environ["UAVCAN__LOOPBACK__BIT"]                         = "1"
 
     >>> import asyncio
@@ -67,45 +73,90 @@ The node instance we just created will periodically publish ``uavcan.node.Heartb
 respond to ``uavcan.node.GetInfo``,
 and do some other standard things -- read the docs for :class:`Node` for details.
 
-Now we can create ports --- publishers, subscribers, clients, servers --- to interact with the network.
-In order to create a new port, you specify its type and its name
-(the name can be omitted if a fixed port-ID is defined for the data type):
-
->>> import uavcan.si.unit.voltage, uavcan.si.unit.length
->>> pub_voltage  = node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0,  "measured_voltage")
->>> sub_position = node.make_subscriber(uavcan.si.unit.length.Vector3_1_0, "position_setpoint")
->>> client_node_info = node.make_client(uavcan.node.GetInfo_1_0, server_node_id=42)  # Use fixed port-ID of GetInfo.
-
-The ports we obtain from these factory methods are instances of
+Now we can create ports --- that is, instances of
 :class:`pyuavcan.presentation.Publisher`,
 :class:`pyuavcan.presentation.Subscriber`,
 :class:`pyuavcan.presentation.Client`,
-:class:`pyuavcan.presentation.Server`.
-Here's a basic primer on how to use them:
+:class:`pyuavcan.presentation.Server`
+--- to interact with the network.
+To create a new port you need to specify its type and name
+(the name can be omitted if a fixed port-ID is defined for the data type).
+
+
+Publishers and subscribers
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Create a publisher and publish a message:
+
+>>> import uavcan.si.unit.voltage
+>>> pub_voltage  = node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0,  "measured_voltage")
+>>> pub_voltage.publish_soon(uavcan.si.unit.voltage.Scalar_1_0(402.15))     # Publish message asynchronously.
+>>> await_(pub_voltage.publish(uavcan.si.unit.voltage.Scalar_1_0(402.15)))  # Or synchronously.
+True
+
+Create a subscription and receive a message from it:
 
 ..  doctest::
     :hide:
 
+    >>> import uavcan.si.unit.length
     >>> pub = node.presentation.make_publisher(uavcan.si.unit.length.Vector3_1_0, 6544)
-    >>> await_(pub.publish(uavcan.si.unit.length.Vector3_1_0([42.0, 15.4, -8.7])))
-    True
+    >>> pub.publish_soon(uavcan.si.unit.length.Vector3_1_0([42.0, 15.4, -8.7]))
 
->>> pub_voltage.publish_soon(uavcan.si.unit.voltage.Scalar_1_0(402.15))     # Publish message.
->>> msg, metadata = await_(sub_position.receive_for(timeout=0.5))           # Receive message from subscription.
->>> msg.meter[0], msg.meter[1], msg.meter[2]
+>>> import uavcan.si.unit.length
+>>> sub_position = node.make_subscriber(uavcan.si.unit.length.Vector3_1_0, "position_setpoint")
+>>> msg, metadata = await_(sub_position.receive_for(timeout=0.5))
+>>> msg.meter[0], msg.meter[1], msg.meter[2]                            # Some payload in the message we received.
 (42.0, 15.4, -8.7)
->>> metadata.source_node_id, metadata.priority, metadata.transfer_id        # Metadata for the above message.
+>>> metadata.source_node_id, metadata.priority, metadata.transfer_id    # Metadata for the message.
 (42, <Priority.NOMINAL: 4>, 0)
->>> response, metadata = await_(client_node_info.call(uavcan.node.GetInfo_1_0.Request()))   # Call RPC-service.
+
+
+RPC-service clients and servers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Define an RPC-service of an application-specific type:
+
+>>> from sirius_cyber_corp import PerformLinearLeastSquaresFit_1_0  # An application-specific DSDL definition.
+>>> async def solve_linear_least_squares(
+...     request: PerformLinearLeastSquaresFit_1_0.Request,
+...     metadata: pyuavcan.presentation.ServiceRequestMetadata,
+... ) -> PerformLinearLeastSquaresFit_1_0.Response:                 # Business logic.
+...     import numpy as np
+...     x = np.array([p.x for p in request.points])
+...     y = np.array([p.y for p in request.points])
+...     s, *_ = np.linalg.lstsq(np.vstack([x, np.ones(len(x))]).T, y, rcond=None)
+...     return PerformLinearLeastSquaresFit_1_0.Response(slope=s[0], y_intercept=s[1])
+>>> srv_least_squares = node.get_server(PerformLinearLeastSquaresFit_1_0, "least_squares")
+>>> srv_least_squares.serve_in_background(solve_linear_least_squares)  # Run the server in a background task.
+
+Invoke the service we defined above assuming that it is served by node 42:
+
+>>> from sirius_cyber_corp import PointXY_1_0
+>>> cln_least_sq = node.make_client(PerformLinearLeastSquaresFit_1_0, server_node_id=42, port_name="least_squares")
+>>> req = PerformLinearLeastSquaresFit_1_0.Request([PointXY_1_0(10, 1), PointXY_1_0(20, 2)])
+>>> response, metadata = await_(cln_least_sq.call(req))
+>>> round(response.slope, 1), round(response.y_intercept, 1)
+(0.1, 0.0)
+
+Here is another example showcasing the use of a standard service with a fixed port-ID:
+
+>>> client_node_info = node.make_client(uavcan.node.GetInfo_1_0, server_node_id=42)
+>>> response, metadata = await_(client_node_info.call(uavcan.node.GetInfo_1_0.Request()))
 >>> response.software_version
 uavcan.node.Version.1.0(major=1, minor=0)
 
+
+Registers and application settings
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 Now, you are probably wondering, how come we just created a node without specifying which transport it should use,
-its node-ID, or even the subject-IDs for the publisher and the subscriber.
+its node-ID, or even the subject-IDs and service-IDs?
 Where did these values come from?
-They come from the *registers*, as defined in the UAVCAN Specification
+
+These values were read from from the *registers*, as defined in the UAVCAN Specification
 (chapter "Application layer", section "Register interface").
-Those familiar with ROS will find similarities with the services provided by the *ROS Parameter Server*.
+Those familiar with ROS will find similarities with the *ROS Parameter Server*.
 
 The registers are named values that keep various settings and parameters of the node.
 The factory method :meth:`Node.from_registers` we used above just reads the registers
@@ -146,9 +197,9 @@ The above shows a regular register that is stored in the register file.
 It is often useful to have dynamic registers that are never stored but computed at every invocation
 (like performance counters, diagnostics, real-time process variables, etc.):
 
->>> import numpy
+>>> import numpy as np
 >>> node.create_register("my_application.estimator.state_vector",
-...                      lambda: Value(real64=Real64(numpy.random.random((4, 1)).flatten())))
+...                      lambda: Value(real64=Real64(np.random.random((4, 1)).flatten())))
 >>> node.registry["my_application.estimator.state_vector"].floats   # Some random things.
 [..., ..., ..., ...]
 
