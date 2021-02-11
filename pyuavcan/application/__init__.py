@@ -3,27 +3,13 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 # noinspection PyUnresolvedReferences
-"""
-The application module contains application-level protocol entities.
-This module is not imported automatically because:
+r"""
+Application layer overview
+++++++++++++++++++++++++++
 
-- Some applications may choose to rely on the presentation-level API directly instead of using this higher-level module,
-  in which case having it imported would be counter-productive due to increased initialization time, memory footprint,
-  and possible reliability issues. The presentation level is the main abstraction layer provided by this library.
-  The functionality of this application-level module is built on top of the public user-facing API of the
-  presentation layer (no internal interfaces between modules exist). See :mod:`pyuavcan.presentation`.
-
-- The module depends on DSDL generated packages, particularly on that of the standard root namespace ``uavcan``,
-  so this module cannot be imported until the required code is generated.
-
->>> import pyuavcan
->>> pyuavcan.transport   # Works.
-<module ...>
->>> pyuavcan.application  # doctest: +SKIP
-Traceback (most recent call last):
-    ...
-AttributeError: module 'pyuavcan' has no attribute 'application'
->>> import pyuavcan.application  # Will fail unless the DSDL package "uavcan" is generated and importable.
+The application module contains the application-layer API.
+This module is not imported automatically because it depends on the transpiled DSDL namespace ``uavcan``.
+The DSDL namespace can be either transpiled manually or lazily ad-hoc; see :mod:`pyuavcan.dsdl` for related docs.
 
 Classes contained here affect the state of the bus by publishing data, responding to service requests, or otherwise.
 It is expected that some applications may need to complete early initialization procedures before
@@ -38,7 +24,212 @@ There are several nested submodules,
 each dedicated to a particular *application-level function* of the UAVCAN protocol,
 such as :mod:`pyuavcan.application.heartbeat_publisher`;
 each such module shall be imported explicitly.
-Read the UAVCAN specification for background.
+
+
+Node class
+++++++++++
+
+The class :class:`pyuavcan.application.Node` models a UAVCAN node --- it is one of the main entities of the library.
+The application uses it to interact with the network: create publications/subscriptions, invoke and serve RPC-services.
+
+..  doctest::
+    :hide:
+
+    >>> import os
+    >>> os.environ["UAVCAN__NODE__ID__NATURAL16"]                   = "42"
+    >>> os.environ["UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16"]  = "6543"
+    >>> os.environ["UAVCAN__SUB__POSITION_SETPOINT__ID__NATURAL16"] = "6544"
+    >>> os.environ["UAVCAN__LOOPBACK__BIT"]                         = "1"
+
+    >>> import asyncio
+    >>> await_ = asyncio.get_event_loop().run_until_complete
+
+Create a node using the factory method :meth:`Node.from_registers` and start it:
+
+>>> import pyuavcan.application
+>>> import uavcan.node                                  # Transcompiled DSDL namespace (see pyuavcan.dsdl).
+>>> node_info = pyuavcan.application.NodeInfo(          # This is an alias for uavcan.node.GetInfo.Response.
+...     protocol_version=uavcan.node.Version_1_0(*pyuavcan.UAVCAN_SPECIFICATION_VERSION),
+...     software_version=uavcan.node.Version_1_0(major=1, minor=0),
+...     name="org.uavcan.pyuavcan.docs",
+... )
+>>> node = pyuavcan.application.Node.from_registers(node_info)
+>>> node.start()
+
+..  doctest::
+    :hide:
+
+    >>> for k in os.environ:
+    ...     if "__" in k:
+    ...         del os.environ[k]
+
+The node instance we just created will periodically publish ``uavcan.node.Heartbeat``,
+respond to ``uavcan.node.GetInfo``,
+and do some other standard things -- read the docs for :class:`Node` for details.
+
+Now we can create ports --- publishers, subscribers, clients, servers --- to interact with the network.
+In order to create a new port, you specify its type and its name
+(the name can be omitted if a fixed port-ID is defined for the data type):
+
+>>> import uavcan.si.unit.voltage, uavcan.si.unit.length
+>>> pub_voltage  = node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0,  "measured_voltage")
+>>> sub_position = node.make_subscriber(uavcan.si.unit.length.Vector3_1_0, "position_setpoint")
+>>> client_node_info = node.make_client(uavcan.node.GetInfo_1_0, server_node_id=42)  # Use fixed port-ID of GetInfo.
+
+The ports we obtain from these factory methods are instances of
+:class:`pyuavcan.presentation.Publisher`,
+:class:`pyuavcan.presentation.Subscriber`,
+:class:`pyuavcan.presentation.Client`,
+:class:`pyuavcan.presentation.Server`.
+Here's a basic primer on how to use them:
+
+..  doctest::
+    :hide:
+
+    >>> pub = node.presentation.make_publisher(uavcan.si.unit.length.Vector3_1_0, 6544)
+    >>> await_(pub.publish(uavcan.si.unit.length.Vector3_1_0([42.0, 15.4, -8.7])))
+    True
+
+>>> pub_voltage.publish_soon(uavcan.si.unit.voltage.Scalar_1_0(402.15))     # Publish message.
+>>> msg, metadata = await_(sub_position.receive_for(timeout=0.5))           # Receive message from subscription.
+>>> msg.meter[0], msg.meter[1], msg.meter[2]
+(42.0, 15.4, -8.7)
+>>> metadata.source_node_id, metadata.priority, metadata.transfer_id        # Metadata for the above message.
+(42, <Priority.NOMINAL: 4>, 0)
+>>> response, metadata = await_(client_node_info.call(uavcan.node.GetInfo_1_0.Request()))   # Call RPC-service.
+>>> response.software_version
+uavcan.node.Version.1.0(major=1, minor=0)
+
+Now, you are probably wondering, how come we just created a node without specifying which transport it should use,
+its node-ID, or even the subject-IDs for the publisher and the subscriber.
+Where did these values come from?
+They come from the ***registers***, as defined in the UAVCAN Specification
+(chapter "Application layer", section "Register interface").
+Those familiar with ROS will find similarities with the services provided by the *ROS Parameter Server*.
+
+The registers are named values that keep various settings and parameters of the node.
+The factory method :meth:`Node.from_registers` we used above just reads the registers
+and figures out how to construct the node from that: which transport to use, the node-ID, the subject-IDs, and so on.
+Any UAVCAN application is also expected to keep its own configuration parameters in the registers so that
+it can be reconfigured and controlled at runtime via UAVCAN.
+
+The registry of the node instance can be accessed via :attr:`Node.registry` which is an instance of
+:class:`pyuavcan.application.register.Registry`:
+
+>>> int(node.registry["uavcan.node.id"])        # Standard registers defined by UAVCAN are named like "uavcan.*"
+42
+>>> node.presentation.transport.local_node_id   # Yup, indeed, the node-ID is picked up from the register.
+42
+>>> int(node.registry["uavcan.pub.measured_voltage.id"])    # This is where we got the subject-ID from.
+6543
+>>> pub_voltage.port_id
+6543
+>>> int(node.registry["uavcan.sub.position_setpoint.id"])   # And so on.
+6544
+>>> str(node.registry["uavcan.sub.position_setpoint.type"]) # Subscription type is automatically exposed via registry.
+'uavcan.si.unit.length.Vector3.1.0'
+
+The node instance also implements the register network service (``uavcan.register.Access``, ``uavcan.register.List``)
+so other network participants can access the registry of the local node and reconfigure it.
+The application can also do that locally, of course.
+New registers can be created using :meth:`Node.create_register`:
+
+>>> from pyuavcan.application.register import Value, Real64  # Convenience aliases for uavcan.register.Value, etc.
+>>> node.create_register("my_application.pid_gains", Value(real64=Real64([1.15, 0.8, 0.03])))
+>>> node.registry["my_application.pid_gains"].floats
+[1.15, 0.8, 0.03]
+>>> node.registry["my_application.pid_gains"] = 2, 1, 0.05  # Registers are strongly typed; conversion is automatic.
+>>> node.registry["my_application.pid_gains"].floats
+[2.0, 1.0, 0.05]
+
+The above shows a regular register that is stored in the register file.
+It is often useful to have dynamic registers that are never stored but computed at every invocation
+(like performance counters, diagnostics, real-time process variables, etc.):
+
+>>> import numpy
+>>> node.create_register("my_application.estimator.state_vector",
+...                      lambda: Value(real64=Real64(numpy.random.random((4, 1)).flatten())))
+>>> node.registry["my_application.estimator.state_vector"].floats   # Some random things.
+[..., ..., ..., ...]
+
+But the above does not explain where did the example get the register values from.
+There are two places:
+
+- **The register file** which contains a simple key-value database table.
+  If the file does not exist (like at the first run), it is automatically created.
+  If no file location is provided when invoking :meth:`Node.from_registers`,
+  the registry is stored in memory so that all state is lost when the node is closed.
+
+- **The environment variables.**
+  The mapping between register names and environment variables is as follows,
+  where ``ty`` is the register type like ``string``, ``natural16``, etc.
+  (see :mod:`pyuavcan.application.register` for the full list):
+
+  >>> name = 'm.motor.flux_linkage'
+  >>> ty = 'real64'
+  >>> (name + "." + ty).upper().replace(".", "_" * 2)  # Register --> environment variable name mapping rule.
+  'M__MOTOR__FLUX_LINKAGE__REAL64'
+
+  String-typed register values are passed as-is, "unstructured" register values are hex-encoded (aka Base16),
+  and numerical values are passed as decimals. Array elements are space-separated.
+  For example, register ``m.motor.inductance_dq`` of type ``real64[2]`` and value (0.12, 0.13)
+  is passed as an environment variable named ``M__MOTOR__INDUCTANCE_DQ__REAL64`` assigned ``0.12 0.13``.
+
+When the environment variables are parsed, the values stored in the register file are automatically updated.
+
+In the following example we use a real register file and emulate some environment variables for demo purposes:
+
+>>> env = {
+...     "UAVCAN__NODE__ID__NATURAL16":                  "42",       # Name/type are defined by the UAVCAN Specification.
+...     "UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16": "6543",
+...     "UAVCAN__UDP__IP__STRING":      "127.63.0.0",               # Setup a heterogeneously redundant transport:
+...     "UAVCAN__SERIAL__PORT__STRING": "socket://localhost:50905", # UAVCAN/UDP + UAVCAN/serial.
+...     "M__MOTOR__INDUCTANCE_DQ__REAL64": "0.12 0.13",             # Application-specific parameters.
+... }
+>>> node = pyuavcan.application.Node.from_registers(
+...     node_info,
+...     register_file="registers.db",   # Will be created if doesn't exist.
+...     environment_variables=env,      # Defaults to os.environ, here we override it.
+... )
+>>> node.registry["uavcan.node.id"].ints
+[42]
+>>> node.registry["uavcan.pub.measured_voltage.id"].ints
+[6543]
+>>> str(node.registry["uavcan.udp.ip"])  # Multiple whitespace-separated addresses encode redundant configuration.
+'127.63.0.0'
+>>> str(node.registry["uavcan.serial.port"])  # Normally it's like "/dev/ttyUSB0", "COM9", etc (possibly redundant).
+'socket://localhost:50905'
+>>> node.registry["m.motor.inductance_dq"].floats
+[0.12, 0.13]
+
+Naturally, in order to launch a node one would need to export the required environment variables.
+While this can be done trivially using a shell script or something similar,
+we recommend using the UAVCAN orchestrator implemented in the Yakut command-line tool
+(those familiar with ROS will find certain parallels with roslaunch).
+It allows one to define UAVCAN network configuration in YAML files with first-class support for passing
+registers via environment variables.
+
+It is also possible to just hard-code a specific node configuration instead of relying on the registers
+by manually initializing an instance of :class:`pyuavcan.transport.Transport`,
+then :class:`pyuavcan.presentation.Presentation`,
+then passing that into the constructor of :class:`pyuavcan.application.Node`,
+but this is *not recommended*.
+
+
+Application-layer function implementations
+++++++++++++++++++++++++++++++++++++++++++
+
+As mentioned in the description of the Node class, it provides certain bare-minumum standard application-layer
+functionality like publishing heartbeats, responding to GetInfo, serving the register API, etc.
+More complex capabilities are to be set up by the user as needed.
+Some of them are:
+
+.. autosummary::
+   pyuavcan.application.diagnostic.DiagnosticSubscriber
+   pyuavcan.application.diagnostic.DiagnosticPublisher
+   pyuavcan.application.node_tracker.NodeTracker
+   pyuavcan.application.plug_and_play.Allocatee
+   pyuavcan.application.plug_and_play.Allocator
 """
 
 from ._node import Node as Node, NodeInfo as NodeInfo

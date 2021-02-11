@@ -172,7 +172,7 @@ class Node:
         else:  # pragma: no cover
             raise TypeError(f"Invalid register creation argument: {v}")
 
-    def make_publisher(self, dtype: Type[MessageClass], port_name: str) -> Publisher[MessageClass]:
+    def make_publisher(self, dtype: Type[MessageClass], port_name: str = "") -> Publisher[MessageClass]:
         """
         Wrapper over :meth:`Presentation.make_publisher` that takes the subject-ID from the standard register
         ``uavcan.pub.PORT_NAME.id``.
@@ -184,7 +184,7 @@ class Node:
         """
         return self.presentation.make_publisher(dtype, self._resolve_port(dtype, "pub", port_name))
 
-    def make_subscriber(self, dtype: Type[MessageClass], port_name: str) -> Subscriber[MessageClass]:
+    def make_subscriber(self, dtype: Type[MessageClass], port_name: str = "") -> Subscriber[MessageClass]:
         """
         Wrapper over :meth:`Presentation.make_subscriber` that takes the subject-ID from the standard register
         ``uavcan.sub.PORT_NAME.id``.
@@ -196,7 +196,7 @@ class Node:
         """
         return self.presentation.make_subscriber(dtype, self._resolve_port(dtype, "sub", port_name))
 
-    def make_client(self, dtype: Type[ServiceClass], port_name: str, server_node_id: int) -> Client[ServiceClass]:
+    def make_client(self, dtype: Type[ServiceClass], server_node_id: int, port_name: str = "") -> Client[ServiceClass]:
         """
         Wrapper over :meth:`Presentation.make_client` that takes the service-ID from the standard register
         ``uavcan.cln.PORT_NAME.id``.
@@ -206,9 +206,13 @@ class Node:
 
         :raises: :class:`register.MissingRegisterError` if the register is missing and no fixed port-ID is defined.
         """
-        return self.presentation.make_client(dtype, self._resolve_port(dtype, "cln", port_name), server_node_id)
+        return self.presentation.make_client(
+            dtype,
+            service_id=self._resolve_port(dtype, "cln", port_name),
+            server_node_id=server_node_id,
+        )
 
-    def get_server(self, dtype: Type[ServiceClass], port_name: str) -> Server[ServiceClass]:
+    def get_server(self, dtype: Type[ServiceClass], port_name: str = "") -> Server[ServiceClass]:
         """
         Wrapper over :meth:`Presentation.get_server` that takes the service-ID from the standard register
         ``uavcan.srv.PORT_NAME.id``.
@@ -270,6 +274,7 @@ class Node:
         """
         Closes the underlying presentation instance, application-level functions, and all other entities.
         Does nothing if already closed.
+        The user does not have to close every port manually as it will be done automatically.
         """
         try:
             self._heartbeat_publisher.close()
@@ -308,30 +313,20 @@ class Node:
             for name, value in register.parse_environment_variables(environment_variables):
                 db.set(name, value)
             transport = construct_transport_from_registers(registry)
+
+            return Node(
+                Presentation(transport),
+                info,
+                register_file,
+                environment_variables=environment_variables,
+            )
         finally:
             registry.close()
 
-        if transport is None:
-            raise register.MissingRegisterError(
-                f"The available registers do not encode a valid transport configuration. "
-                f"For reference, the names of available registers are as follows: "
-                f"{list(registry)}"
-            )
 
-        return Node(
-            Presentation(transport),
-            info,
-            register_file,
-            environment_variables=environment_variables,
-        )
-
-
-def construct_transport_from_registers(registry: register.Registry) -> Optional[pyuavcan.transport.Transport]:
+def construct_transport_from_registers(registry: register.Registry) -> pyuavcan.transport.Transport:
     """
-    Parses the supplied registers and constructs a transport instance out of that.
-    If more than one transport is specified, they are automatically merged under one RedundantTransport instance.
-    If no transports are specified, None is returned.
-
+    Parses the supplied registers and constructs a RedundantTransport instance out of that.
     Transport implementation subpackages are only imported if their construction is requested.
     This means that it is not necessary to have all transport-specific dependencies installed to use this factory.
     """
@@ -404,9 +399,13 @@ def construct_transport_from_registers(registry: register.Registry) -> Optional[
                 media = PythonCANMedia(iface, bitrate, mtu)
             yield CANTransport(media, node_id)
 
-    transports = *udp(), *serial(), *can()
-    if len(transports) == 0:
-        return None
+    def loopback() -> Iterator[pyuavcan.transport.Transport]:
+        if registry.get("uavcan.loopback"):
+            from pyuavcan.transport.loopback import LoopbackTransport
+
+            yield LoopbackTransport(node_id)
+
+    transports = *udp(), *serial(), *can(), *loopback()
     if len(transports) == 1:
         return transports[0]
 

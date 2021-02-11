@@ -7,17 +7,16 @@ r"""
 Presentation layer overview
 +++++++++++++++++++++++++++
 
-The presentation layer provides a high-level object-oriented interface on top of the transport layer.
-This is the highest level of abstraction available to the user of the library.
-When creating a new port instance (e.g., a publisher), the calling code will always interact
-directly with the presentation layer.
-The application layer functions provided on top of the presentation layer by the respective submodule are
-entirely optional; it is expected that some applications will bypass the application layer entirely.
+The presentation layer is responsible for serializing and deserializing DSDL objects and for providing a higher-level
+object-oriented interface on top of the transport layer.
+A typical application should not access this layer directly;
+instead, it should rely on the high-level API provided by :mod:`pyuavcan.application`.
 
 The presentation layer uses the term *port* to refer to an instance of publisher, subscriber, service client,
 or service server for a specific subject or service (see the inheritance diagram below).
-The presentation layer allows the application to create multiple ports that access the same underlying transport
-layer instance concurrently, taking care of all related data management and synchronization issues automatically.
+
+It is possible to create multiple ports that access the same underlying transport layer instance concurrently,
+taking care of all related data management and synchronization issues automatically.
 This minimizes the logical coupling between different components
 of the application that have to rely on the same UAVCAN network resource.
 For example, when the application creates more than one subscriber for a given subject, the presentation
@@ -40,6 +39,10 @@ Trivial types may be omitted from the diagram.
 
 Usage example
 +++++++++++++
+
+.. important::
+    A typical application should not instantiate presentation-layer entities directly;
+    instead, use the higher-level API provided by :mod:`pyuavcan.application`.
 
 The main entity of the presentation layer is the class :class:`pyuavcan.presentation.Presentation`;
 the following demo shows how it can be used.
