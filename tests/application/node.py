@@ -12,13 +12,13 @@ from pyuavcan.presentation import Presentation
 
 
 @pytest.mark.asyncio  # type: ignore
-async def _unittest_slow_node(generated_packages: typing.List[pyuavcan.dsdl.GeneratedPackageInfo]) -> None:
+async def _unittest_slow_node(compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo]) -> None:
     from pyuavcan.application import Node
     from uavcan.node import Version_1_0, Heartbeat_1_0, GetInfo_1_0, Mode_1_0, Health_1_0
 
     asyncio.get_running_loop().slow_callback_duration = 3.0
 
-    assert generated_packages
+    assert compiled
     remote_pres = Presentation(UDPTransport("127.1.1.1"))
     remote_hb_sub = remote_pres.make_subscriber_with_fixed_subject_id(Heartbeat_1_0)
     remote_info_cln = remote_pres.make_client_with_fixed_service_id(GetInfo_1_0, 258)

@@ -24,7 +24,7 @@ _CACHE_FILE_NAME = "pydsdl_cache.pickle.tmp"
 
 
 @pytest.fixture(scope="session")  # type: ignore
-def generated_packages() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
+def compiled() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
     """
     https://docs.pytest.org/en/latest/fixture.html#conftest-py-sharing-fixture-functions
 
@@ -33,11 +33,11 @@ def generated_packages() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
     and generally goes against one of the Python's core principles about explicit vs. implicit.
     I am not a big fan of this feature.
     """
-    return generate_packages()
+    return compile()
 
 
 @functools.lru_cache()
-def generate_packages() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
+def compile() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
     """
     Runs the DSDL package generator against the standard and test namespaces, emits a list of GeneratedPackageInfo.
     Automatically adds the path to the generated packages to sys path to make them importable.
@@ -66,17 +66,17 @@ def generate_packages() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
     try:
         pydsdl_logger.setLevel(logging.INFO)
         out = [
-            pyuavcan.dsdl.generate_package(
+            pyuavcan.dsdl.compile(
                 DEMO_DIR / "public_regulated_data_types" / "uavcan",
                 [],
                 DESTINATION_DIR,
             ),
-            pyuavcan.dsdl.generate_package(
+            pyuavcan.dsdl.compile(
                 DEMO_DIR / "custom_data_types" / "sirius_cyber_corp",
                 [],
                 DESTINATION_DIR,
             ),
-            pyuavcan.dsdl.generate_package(
+            pyuavcan.dsdl.compile(
                 SELF_DIR / "test_dsdl_namespace",
                 [DEMO_DIR / "public_regulated_data_types" / "uavcan"],
                 DESTINATION_DIR,

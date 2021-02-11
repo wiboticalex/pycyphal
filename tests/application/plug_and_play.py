@@ -20,11 +20,11 @@ _logger = logging.getLogger(__name__)
 @pytest.mark.parametrize("mtu", [8, 16, 20, 64])  # type: ignore
 @pytest.mark.asyncio  # type: ignore
 async def _unittest_slow_plug_and_play_centralized(
-    generated_packages: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], mtu: int
+    compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], mtu: int
 ) -> None:
     from pyuavcan.application.plug_and_play import CentralizedAllocator, Allocatee
 
-    assert generated_packages
+    assert compiled
 
     asyncio.get_running_loop().slow_callback_duration = 5.0
 
@@ -104,11 +104,11 @@ async def _unittest_slow_plug_and_play_centralized(
 
 @pytest.mark.asyncio  # type: ignore
 async def _unittest_slow_plug_and_play_allocatee(
-    generated_packages: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any
+    compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any
 ) -> None:
     from pyuavcan.application.plug_and_play import Allocatee, NodeIDAllocationData_2, ID
 
-    assert generated_packages
+    assert compiled
 
     asyncio.get_running_loop().slow_callback_duration = 5.0
 

@@ -93,7 +93,7 @@ def _get_run_configs() -> typing.Iterable[RunConfig]:
 @pytest.mark.parametrize("parameters", [(idx == 0, rc) for idx, rc in enumerate(_get_run_configs())])  # type: ignore
 @pytest.mark.asyncio  # type: ignore
 async def _unittest_slow_demo_app(
-    generated_packages: typing.Iterator[typing.List[pyuavcan.dsdl.GeneratedPackageInfo]],
+    compiled: typing.Iterator[typing.List[pyuavcan.dsdl.GeneratedPackageInfo]],
     parameters: typing.Tuple[bool, RunConfig],
 ) -> None:
     import uavcan.node
@@ -102,7 +102,7 @@ async def _unittest_slow_demo_app(
     import pyuavcan.application  # pylint: disable=redefined-outer-name
 
     asyncio.get_running_loop().slow_callback_duration = 3.0
-    _ = generated_packages
+    _ = compiled
 
     first_run, run_config = parameters
     if first_run:

@@ -14,12 +14,12 @@ from pyuavcan.presentation import Presentation
 
 @pytest.mark.asyncio  # type: ignore
 async def _unittest_slow_diagnostic(
-    generated_packages: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any
+    compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any
 ) -> None:
     from pyuavcan.application import diagnostic
     from uavcan.time import SynchronizedTimestamp_1_0
 
-    assert generated_packages
+    assert compiled
     asyncio.get_running_loop().slow_callback_duration = 1.0
 
     pres = Presentation(LoopbackTransport(2222))

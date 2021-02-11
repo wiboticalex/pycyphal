@@ -37,13 +37,13 @@ except (ImportError, AttributeError):
     # Compile our application-specific namespace. It may make use of the standard data types (most namespaces do,
     # because the standard root namespace contains important basic types), so we include it in the lookup path set.
     # The paths are hard-coded here for the sake of conciseness.
-    pyuavcan.dsdl.generate_package(
+    pyuavcan.dsdl.compile(
         root_namespace_directory=src_dir / "custom_data_types/sirius_cyber_corp",
         lookup_directories=[src_dir / "public_regulated_data_types/uavcan/"],
         output_directory=dsdl_compiled_dir,
     )
     # Compile the standard namespace. The order actually doesn't matter.
-    pyuavcan.dsdl.generate_package(
+    pyuavcan.dsdl.compile(
         root_namespace_directory=src_dir / "public_regulated_data_types/uavcan/",
         output_directory=dsdl_compiled_dir,
     )

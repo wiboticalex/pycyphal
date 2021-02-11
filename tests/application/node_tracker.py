@@ -14,13 +14,13 @@ _logger = logging.getLogger(__name__)
 
 @pytest.mark.asyncio  # type: ignore
 async def _unittest_slow_node_tracker(
-    generated_packages: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any
+    compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any
 ) -> None:
     from . import get_transport
     from pyuavcan.presentation import Presentation
     from pyuavcan.application.node_tracker import NodeTracker, Entry
 
-    assert generated_packages
+    assert compiled
 
     p_a = Presentation(get_transport(0xA))
     p_b = Presentation(get_transport(0xB))

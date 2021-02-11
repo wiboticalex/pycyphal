@@ -49,7 +49,7 @@ the following demo shows how it can be used.
 This example is based on a simple loopback transport that does not interact with the outside world
 (it doesn't perform IO with the OS), which makes it well-suited for demo needs.
 
->>> import tests; tests.dsdl.generate_packages()  # DSDL generation not shown; see the pyuavcan.dsdl docs for info.
+>>> import tests; tests.dsdl.compile()  # DSDL generation not shown; see the pyuavcan.dsdl docs for info.
 [...]
 >>> import uavcan.node, uavcan.diagnostic         # Import what we need from DSDL-generated packages.
 >>> import pyuavcan.transport.loopback            # Import the demo transport implementation.

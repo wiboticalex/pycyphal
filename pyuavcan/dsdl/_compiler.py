@@ -52,7 +52,8 @@ class GeneratedPackageInfo:
     """
 
 
-def generate_package(
+# noinspection PyShadowingBuiltins
+def compile(
     root_namespace_directory: _AnyPath,
     lookup_directories: typing.Optional[typing.List[_AnyPath]] = None,
     output_directory: typing.Optional[_AnyPath] = None,
@@ -168,11 +169,11 @@ def generate_package(
     ...     import sirius_cyber_corp
     ...     import uavcan.si.sample.volumetric_flow_rate
     ... except (ImportError, AttributeError):
-    ...     _ = pyuavcan.dsdl.generate_package(root_namespace_directory='tests/dsdl/namespaces/sirius_cyber_corp',
-    ...                                        lookup_directories=['tests/public_regulated_data_types/uavcan'],
-    ...                                        output_directory=dsdl_generated_dir)
-    ...     _ = pyuavcan.dsdl.generate_package(root_namespace_directory='tests/public_regulated_data_types/uavcan',
-    ...                                        output_directory=dsdl_generated_dir)
+    ...     _ = pyuavcan.dsdl.compile(root_namespace_directory='tests/dsdl/namespaces/sirius_cyber_corp',
+    ...                               lookup_directories=['tests/public_regulated_data_types/uavcan'],
+    ...                               output_directory=dsdl_generated_dir)
+    ...     _ = pyuavcan.dsdl.compile(root_namespace_directory='tests/public_regulated_data_types/uavcan',
+    ...                               output_directory=dsdl_generated_dir)
     ...     importlib.invalidate_caches()
     ...     import sirius_cyber_corp
     ...     import uavcan.si.sample.volumetric_flow_rate
