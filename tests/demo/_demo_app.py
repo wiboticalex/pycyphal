@@ -3,13 +3,12 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 import os
-import re
 import sys
+import math
 import shutil
-import typing
+from typing import Iterable, Dict, Iterator, Tuple, List
 import asyncio
 import pathlib
-import tempfile
 import dataclasses
 import pytest
 import pyuavcan
@@ -20,84 +19,64 @@ DEMO_APP_NODE_ID = 42
 DEMO_DIR = pathlib.Path(__file__).absolute().parent.parent.parent / "demo"
 
 
-@dataclasses.dataclass
+def mirror(env: Dict[str, str]) -> Dict[str, str]:
+    maps = {
+        "UAVCAN__PUB__": "UAVCAN__SUB__",
+        "UAVCAN__SRV__": "UAVCAN__CLN__",
+    }
+    maps.update({v: k for k, v in maps.items()})
+
+    def impl() -> Iterator[Tuple[str, str]]:
+        for k, v in env.items():
+            for m in maps:
+                if m in k:
+                    k = k.replace(m, maps[m])
+                    break
+            yield k, v
+
+    return dict(impl())
+
+
+@dataclasses.dataclass(frozen=True)
 class RunConfig:
-    demo_env_vars: typing.Dict[str, str]
-    local_transport_factory: typing.Callable[[typing.Optional[int]], pyuavcan.transport.Transport]
+    env: Dict[str, str]
 
 
-def _get_run_configs() -> typing.Iterable[RunConfig]:
-    """
-    Provides interface options to test the demo against.
-    When adding new transports, add them to the demo and update this factory accordingly.
-    Don't forget about redundant configurations, too.
-    """
-    from pyuavcan.transport.redundant import RedundantTransport
-    from pyuavcan.transport.serial import SerialTransport
-    from pyuavcan.transport.udp import UDPTransport
-
-    # UDP
+def _get_run_configs() -> Iterable[RunConfig]:
+    yield RunConfig({"UAVCAN__UDP__IP__STRING": "127.0.0.0"})
+    yield RunConfig({"UAVCAN__SERIAL__PORT__STRING": "socket://localhost:50905"})
     yield RunConfig(
-        demo_env_vars={"DEMO_INTERFACE_KIND": "udp"},
-        local_transport_factory=lambda nid: UDPTransport("127.0.0.1", local_node_id=nid),
+        {
+            "UAVCAN__UDP__IP__STRING": "127.0.0.0",
+            "UAVCAN__SERIAL__PORT__STRING": "socket://localhost:50905",
+        }
     )
-
-    # Serial
-    yield RunConfig(
-        demo_env_vars={"DEMO_INTERFACE_KIND": "serial"},
-        local_transport_factory=lambda nid: SerialTransport("socket://localhost:50905", local_node_id=nid),
-    )
-
-    # DMR UDP+Serial
-    def make_udp_serial(nid: typing.Optional[int]) -> pyuavcan.transport.Transport:
-        tr = RedundantTransport()
-        if nid is not None:
-            tr.attach_inferior(UDPTransport(f"127.0.0.{nid}"))
-        else:
-            tr.attach_inferior(UDPTransport(f"127.0.0.1", local_node_id=None))
-        tr.attach_inferior(SerialTransport("socket://localhost:50905", local_node_id=nid))
-        return tr
-
-    yield RunConfig(
-        demo_env_vars={"DEMO_INTERFACE_KIND": "udp_serial"},
-        local_transport_factory=make_udp_serial,
-    )
-
     if sys.platform.startswith("linux"):
-        from pyuavcan.transport.can.media.socketcan import SocketCANMedia
-        from pyuavcan.transport.can import CANTransport
-
-        # CAN
         yield RunConfig(
-            demo_env_vars={"DEMO_INTERFACE_KIND": "can"},
-            # The demo uses Classic CAN! SocketCAN does not support nonuniform MTU well.
-            local_transport_factory=lambda nid: CANTransport(SocketCANMedia("vcan0", 8), local_node_id=nid),
+            {
+                "UAVCAN__CAN__IFACE__STRING": "socketcan:vcan0",
+                "UAVCAN__CAN__MTU__NATURAL16": "8",
+            }
         )
-
-        # TMR CAN
-        def make_tmr_can(nid: typing.Optional[int]) -> pyuavcan.transport.Transport:
-            from pyuavcan.transport.redundant import RedundantTransport
-
-            tr = RedundantTransport()
-            tr.attach_inferior(CANTransport(SocketCANMedia("vcan0", 8), local_node_id=nid))
-            tr.attach_inferior(CANTransport(SocketCANMedia("vcan1", 32), local_node_id=nid))
-            tr.attach_inferior(CANTransport(SocketCANMedia("vcan2", 64), local_node_id=nid))
-            return tr
-
         yield RunConfig(
-            demo_env_vars={"DEMO_INTERFACE_KIND": "can_can_can"},
-            local_transport_factory=make_tmr_can,
+            {
+                "UAVCAN__CAN__IFACE__STRING": " ".join(f"socketcan:vcan{i}" for i in range(3)),
+                "UAVCAN__CAN__MTU__NATURAL16": "64",
+            }
         )
 
 
 @pytest.mark.parametrize("parameters", [(idx == 0, rc) for idx, rc in enumerate(_get_run_configs())])  # type: ignore
 @pytest.mark.asyncio  # type: ignore
 async def _unittest_slow_demo_app(
-    compiled: typing.Iterator[typing.List[pyuavcan.dsdl.GeneratedPackageInfo]],
-    parameters: typing.Tuple[bool, RunConfig],
+    compiled: Iterator[List[pyuavcan.dsdl.GeneratedPackageInfo]],
+    parameters: Tuple[bool, RunConfig],
 ) -> None:
     import uavcan.node
+    import uavcan.register
     import uavcan.si.sample.temperature
+    import uavcan.si.unit.temperature
+    import uavcan.si.unit.voltage
     import sirius_cyber_corp
     import pyuavcan.application  # pylint: disable=redefined-outer-name
 
@@ -109,14 +88,22 @@ async def _unittest_slow_demo_app(
         # At the first run, force the demo script to regenerate packages.
         # The following runs shall not force this behavior to save time and enhance branch coverage.
         print("FORCE DSDL RECOMPILATION")
-        dsdl_output_path = pathlib.Path(tempfile.gettempdir(), "dsdl-for-my-program")
+        dsdl_output_path = pathlib.Path(".compiled").resolve()
         if dsdl_output_path.exists():
             shutil.rmtree(dsdl_output_path)
 
     # The demo may need to generate packages as well, so we launch it first.
-    demo_proc_env_vars = run_config.demo_env_vars.copy()
-    demo_proc_env_vars.update(
+    env = run_config.env.copy()
+    env.update(
         {
+            # Other registers beyond the transport settings:
+            "UAVCAN__NODE__ID__NATURAL16": str(DEMO_APP_NODE_ID),
+            "UAVCAN__SUB__TEMPERATURE_SETPOINT__ID__NATURAL16": "2345",
+            "UAVCAN__SUB__TEMPERATURE_MEASUREMENT__ID__NATURAL16": "2346",
+            "UAVCAN__PUB__HEATER_VOLTAGE__ID__NATURAL16": "2347",
+            "UAVCAN__SRV__LEAST_SQUARES__ID__NATURAL16": "123",
+            "THERMOSTAT__PID__GAINS__REAL32": "0.1 0.0 0.0",  # Gain 0.1
+            # Various low-level items:
             "PYUAVCAN_LOGLEVEL": "INFO",
             "PATH": os.environ.get("PATH", ""),
             "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),  # https://github.com/appveyor/ci/issues/1995
@@ -128,38 +115,36 @@ async def _unittest_slow_demo_app(
         "coverage",
         "run",
         str(DEMO_DIR / "demo_app.py"),
-        environment_variables=demo_proc_env_vars,
+        environment_variables=env,
     )
     assert demo_proc.alive
     print("DEMO APP STARTED WITH PID", demo_proc.pid, "FROM", pathlib.Path.cwd())
 
-    # Initialize the local node for testing.
-    try:
-        transport = run_config.local_transport_factory(123)  # type: ignore
-        presentation = pyuavcan.presentation.Presentation(transport)
-    except Exception:
-        demo_proc.kill()
-        raise
-
-    # Run the test and make sure to clean up at exit to avoid resource usage warnings in the test logs.
     try:
         local_node_info = uavcan.node.GetInfo_1_0.Response(
             protocol_version=uavcan.node.Version_1_0(*pyuavcan.UAVCAN_SPECIFICATION_VERSION),
             software_version=uavcan.node.Version_1_0(*pyuavcan.__version_info__[:2]),
             name="org.uavcan.pyuavcan.test.demo_app",
         )
-        node = pyuavcan.application.Node(presentation, local_node_info)
+        env = mirror(env)
+        env["UAVCAN__NODE__ID__NATURAL16"] = "123"
+        node = pyuavcan.application.Node.from_registers(local_node_info, environment_variables=env)
+        del node.registry["thermostat*"]
+    except Exception:
+        demo_proc.kill()
+        raise
 
-        # Construct the ports we will be using to interact with the demo application.
-        sub_heartbeat = node.presentation.make_subscriber_with_fixed_subject_id(uavcan.node.Heartbeat_1_0)
-        sub_diagnostics = node.presentation.make_subscriber_with_fixed_subject_id(uavcan.diagnostic.Record_1_1)
-        pub_temperature = node.presentation.make_publisher(uavcan.si.sample.temperature.Scalar_1_0, 2345)
-        client_get_info = node.presentation.make_client_with_fixed_service_id(uavcan.node.GetInfo_1_0, DEMO_APP_NODE_ID)
-        client_command = node.presentation.make_client_with_fixed_service_id(
-            uavcan.node.ExecuteCommand_1_1, DEMO_APP_NODE_ID
-        )
-        client_least_squares = node.presentation.make_client(
-            sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0, 123, DEMO_APP_NODE_ID
+    try:
+        sub_heartbeat = node.make_subscriber(uavcan.node.Heartbeat_1_0)
+        cln_get_info = node.make_client(uavcan.node.GetInfo_1_0, DEMO_APP_NODE_ID)
+        cln_command = node.make_client(uavcan.node.ExecuteCommand_1_1, DEMO_APP_NODE_ID)
+        cln_register = node.make_client(uavcan.register.Access_1_0, DEMO_APP_NODE_ID)
+
+        pub_setpoint = node.make_publisher(uavcan.si.unit.temperature.Scalar_1_0, "temperature_setpoint")
+        pub_measurement = node.make_publisher(uavcan.si.sample.temperature.Scalar_1_0, "temperature_measurement")
+        sub_heater_voltage = node.make_subscriber(uavcan.si.unit.voltage.Scalar_1_0, "heater_voltage")
+        cln_least_squares = node.make_client(
+            sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0, DEMO_APP_NODE_ID, "least_squares"
         )
 
         # At the first run, the usage demo might take a long time to start because it has to compile DSDL.
@@ -174,9 +159,9 @@ async def _unittest_slow_demo_app(
         # Once the heartbeat is in, we know that the demo is ready for being tested.
 
         # Validate GetInfo.
-        client_get_info.priority = pyuavcan.transport.Priority.EXCEPTIONAL
-        client_get_info.transfer_id_counter.override(22)
-        info_transfer = await client_get_info.call(uavcan.node.GetInfo_1_0.Request())
+        cln_get_info.priority = pyuavcan.transport.Priority.EXCEPTIONAL
+        cln_get_info.transfer_id_counter.override(22)
+        info_transfer = await cln_get_info.call(uavcan.node.GetInfo_1_0.Request())
         print("GET INFO RESPONSE:", info_transfer)
         assert info_transfer
         info, transfer = info_transfer
@@ -191,7 +176,7 @@ async def _unittest_slow_demo_app(
         assert info.software_version.minor == 0
 
         # Test the linear regression service.
-        solution_transfer = await client_least_squares.call(
+        solution_transfer = await cln_least_squares.call(
             sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Request(
                 points=[
                     sirius_cyber_corp.PointXY_1_0(x=1, y=2),
@@ -209,13 +194,51 @@ async def _unittest_slow_demo_app(
         assert solution.slope == pytest.approx(2.0)
         assert solution.y_intercept == pytest.approx(0.0)
 
-        # Publish temperature. The result will be validated later.
-        pub_temperature.priority = pyuavcan.transport.Priority.SLOW
-        pub_temperature.publish_soon(uavcan.si.sample.temperature.Scalar_1_0(kelvin=321.5))
+        solution_transfer = await cln_least_squares.call(sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Request())
+        print("LINEAR REGRESSION RESPONSE:", info_transfer)
+        assert solution_transfer
+        solution, _ = solution_transfer
+        assert isinstance(solution, sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Response)
+        assert not math.isfinite(solution.slope)
+        assert not math.isfinite(solution.y_intercept)
+
+        # Validate the thermostat.
+        for _ in range(2):
+            assert await pub_setpoint.publish(uavcan.si.unit.temperature.Scalar_1_0(kelvin=315.0))
+            assert await pub_measurement.publish(uavcan.si.sample.temperature.Scalar_1_0(kelvin=300.0))
+            await asyncio.sleep(0.5)
+        rx_voltage = await sub_heater_voltage.receive_for(timeout=3.0)
+        assert rx_voltage
+        msg_voltage, _ = rx_voltage
+        assert isinstance(msg_voltage, uavcan.si.unit.voltage.Scalar_1_0)
+        assert msg_voltage.volt == pytest.approx(1.5)  # The error is 15 kelvin, P-gain is 0.1 (see env vars above)
+
+        # Check the state registers.
+        rx_access = await cln_register.call(
+            uavcan.register.Access_1_0.Request(uavcan.register.Name_1_0("thermostat.setpoint"))
+        )
+        assert rx_access
+        access_resp, _ = rx_access
+        assert isinstance(access_resp, uavcan.register.Access_1_0.Response)
+        assert not access_resp.mutable
+        assert not access_resp.persistent
+        assert access_resp.value.real32
+        assert access_resp.value.real32.value[0] == pytest.approx(315.0)
+
+        rx_access = await cln_register.call(
+            uavcan.register.Access_1_0.Request(uavcan.register.Name_1_0("thermostat.error"))
+        )
+        assert rx_access
+        access_resp, _ = rx_access
+        assert isinstance(access_resp, uavcan.register.Access_1_0.Response)
+        assert not access_resp.mutable
+        assert not access_resp.persistent
+        assert access_resp.value.real32
+        assert access_resp.value.real32.value[0] == pytest.approx(15.0)
 
         # Test the command execution service.
         # Bad command.
-        result_transfer = await client_command.call(
+        result_transfer = await cln_command.call(
             uavcan.node.ExecuteCommand_1_1.Request(
                 command=uavcan.node.ExecuteCommand_1_1.Request.COMMAND_STORE_PERSISTENT_STATES
             )
@@ -228,14 +251,12 @@ async def _unittest_slow_demo_app(
         assert transfer.priority == pyuavcan.transport.Priority.NOMINAL
         assert isinstance(result, uavcan.node.ExecuteCommand_1_1.Response)
         assert result.status == result.STATUS_BAD_COMMAND
-        # Good custom command.
-        result_transfer = await client_command.call(
-            uavcan.node.ExecuteCommand_1_1.Request(
-                command=23456,
-                parameter="This is my custom command parameter",
-            )
+        # Factory reset -- remove the register file.
+        assert demo_proc.alive
+        result_transfer = await cln_command.call(
+            uavcan.node.ExecuteCommand_1_1.Request(command=uavcan.node.ExecuteCommand_1_1.Request.COMMAND_FACTORY_RESET)
         )
-        print("CUSTOM COMMAND RESPONSE:", info_transfer)
+        print("FACTORY RESET COMMAND RESPONSE:", info_transfer)
         assert result_transfer
         result, transfer = result_transfer
         assert transfer.source_node_id == DEMO_APP_NODE_ID
@@ -243,26 +264,12 @@ async def _unittest_slow_demo_app(
         assert transfer.priority == pyuavcan.transport.Priority.NOMINAL
         assert isinstance(result, uavcan.node.ExecuteCommand_1_1.Response)
         assert result.status == result.STATUS_SUCCESS
-        # FINAL COMMAND: ASK THE NODE TO TERMINATE ITSELF.
-        assert demo_proc.alive, "Can't ask a dead node to kill itself, it's impolite."
-        result_transfer = await client_command.call(
-            uavcan.node.ExecuteCommand_1_1.Request(command=uavcan.node.ExecuteCommand_1_1.Request.COMMAND_POWER_OFF)
-        )
-        print("POWER OFF COMMAND RESPONSE:", info_transfer)
-        assert result_transfer
-        result, transfer = result_transfer
-        assert transfer.source_node_id == DEMO_APP_NODE_ID
-        assert transfer.transfer_id == 2
-        assert transfer.priority == pyuavcan.transport.Priority.NOMINAL
-        assert isinstance(result, uavcan.node.ExecuteCommand_1_1.Response)
-        assert result.status == result.STATUS_SUCCESS
 
-        # Validate the heartbeats (all of them) while waiting for the node to terminate.
+        # Validate the heartbeats (all of them).
         prev_hb_transfer = first_hb_transfer
         num_heartbeats = 0
         while True:
-            # The timeout will get triggered at some point because the demo app has been asked to stop.
-            hb_transfer = await sub_heartbeat.receive_for(1.0)
+            hb_transfer = await sub_heartbeat.receive_for(0.1)
             if hb_transfer is None:
                 break
             hb, transfer = hb_transfer
@@ -278,32 +285,8 @@ async def _unittest_slow_demo_app(
             num_heartbeats += 1
         assert num_heartbeats > 0
 
-        # Validate the diagnostic messages while waiting for the node to terminate.
-        async def get_next_diagnostic() -> typing.Optional[str]:
-            d = await sub_diagnostics.receive_for(1.0)
-            if d:
-                print("RECEIVED DIAGNOSTIC:", d)
-                m, t = d
-                assert t.source_node_id == DEMO_APP_NODE_ID
-                assert t.priority == pyuavcan.transport.Priority.OPTIONAL
-                assert isinstance(m, uavcan.diagnostic.Record_1_1)
-                s = m.text.tobytes().decode()
-                assert isinstance(s, str)
-                return s
-            return None
-
-        assert re.match(rf"Least squares request from {transport.local_node_id}.*", await get_next_diagnostic() or "")
-        assert re.match(r"Solution for .*: ", await get_next_diagnostic() or "")
-        assert re.match(rf"Temperature .* from {transport.local_node_id}.*", await get_next_diagnostic() or "")
-        assert not await get_next_diagnostic()
-
-        # We've asked the node to terminate, wait for it here.
-        out_demo_proc = demo_proc.wait(10.0)[1].splitlines()
-        print("DEMO APP FINAL OUTPUT:", *out_demo_proc, sep="\n\t")
-        assert out_demo_proc
-        assert any(re.match(r"TEMPERATURE \d+\.\d+ C", s) for s in out_demo_proc)
-        assert any(re.match(r"CUSTOM COMMAND PARAMETER: This is my custom command parameter", s) for s in out_demo_proc)
+        demo_proc.wait(10.0, interrupt=True)
     finally:
-        presentation.close()
+        node.close()
         demo_proc.kill()
         await asyncio.sleep(2.0)  # Let coroutines terminate properly to avoid resource usage warnings.

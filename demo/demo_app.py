@@ -1,27 +1,21 @@
 #!/usr/bin/env python3
-#
-# PyUAVCAN demo application.
-#
 # Distributed under CC0 1.0 Universal (CC0 1.0) Public Domain Dedication. To the extent possible under law, the
 # UAVCAN Consortium has waived all copyright and related or neighboring rights to this work.
 # pylint: disable=ungrouped-imports,wrong-import-position
 
 import os
 import sys
-import typing
 import pathlib
 import asyncio
 import logging
 import importlib
 import pyuavcan
 
-# We will need a directory to store the transcompiled Python packages in.
-# In this example we use a fixed directory and shard its contents by the library version number.
-# The sharding ensures that we won't attempt to use a package compiled for an older library version with a newer one,
-# as they may be incompatible.
-# When packaging applications for distribution, consider including transcompiled packages rather than generating
-# them at runtime.
-dsdl_compiled_dir = pathlib.Path(f".dsdl.pyuavcan_{pyuavcan.__version__}.compiled")
+# We will need a directory to store the transcompiled Python packages in. In this example we use a fixed directory
+# and shard its contents by the library version number. The sharding ensures that we won't attempt to use a package
+# compiled for an older library version with a newer one, as they may be incompatible. When packaging applications
+# for distribution, consider including transcompiled packages rather than generating them at runtime.
+dsdl_compiled_dir = pathlib.Path(".compiled", f"pyuavcan_{pyuavcan.__version__}").resolve()
 
 # We will need to import the packages once they are compiled, so we should update the module import look-up path set.
 # If you're using an IDE for development, add this path to its look-up set as well for code completion to work.
@@ -62,6 +56,8 @@ import uavcan.si.unit.voltage  # noqa
 
 
 class DemoApplication:
+    REGISTER_FILE = "my_registers.db"
+
     def __init__(self) -> None:
         node_info = uavcan.node.GetInfo_1_0.Response(
             protocol_version=uavcan.node.Version_1_0(*pyuavcan.UAVCAN_SPECIFICATION_VERSION),
@@ -74,7 +70,7 @@ class DemoApplication:
         # The file "my_registers.db" stores the registers of our node (see DSDL namespace uavcan.register).
         # If the file does not exist, it will be created.
         # This is optional though; if the application does not require persistent states, this parameter may be omitted.
-        self._node = pyuavcan.application.Node.from_registers(node_info, "my_registers.db")
+        self._node = pyuavcan.application.Node.from_registers(node_info, DemoApplication.REGISTER_FILE)
 
         # Published heartbeat fields can be configured as follows.
         self._node.heartbeat_publisher.mode = uavcan.node.Mode_1_0.OPERATIONAL  # type: ignore
@@ -115,7 +111,7 @@ class DemoApplication:
     async def _serve_linear_least_squares(
         request: sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Request,
         metadata: pyuavcan.presentation.ServiceRequestMetadata,
-    ) -> typing.Optional[sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Response]:
+    ) -> sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Response:
         logging.info("Least squares request %s from node %d", request, metadata.client_node_id)
         sum_x = sum(map(lambda p: p.x, request.points))  # type: ignore
         sum_y = sum(map(lambda p: p.y, request.points))  # type: ignore
@@ -125,39 +121,28 @@ class DemoApplication:
             slope = a / b
             y_intercept = (sum_y - slope * sum_x) / len(request.points)
         except ZeroDivisionError:
-            logging.error("There is no solution for input set %s (request metadata: %s)", request.points, metadata)
-            # If we return None (or throw), no response will be sent back.
-            # This practice is actually discouraged; we do it here only to demonstrate the library capabilities.
-            return None
+            slope = float("nan")
+            y_intercept = float("nan")
         return sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Response(slope=slope, y_intercept=y_intercept)
 
+    @staticmethod
     async def _serve_execute_command(
-        self,
         request: uavcan.node.ExecuteCommand_1_1.Request,
         metadata: pyuavcan.presentation.ServiceRequestMetadata,
     ) -> uavcan.node.ExecuteCommand_1_1.Response:
         logging.info("Execute command request %s from node %d", request, metadata.client_node_id)
-        if request.command == uavcan.node.ExecuteCommand_1_1.Request.COMMAND_POWER_OFF:
-
-            async def do_delayed_shutdown() -> None:
-                await asyncio.sleep(1.0)
-                self.close()
-
-            asyncio.ensure_future(do_delayed_shutdown())  # Delay shutdown to let the transport emit the response.
+        if request.command == uavcan.node.ExecuteCommand_1_1.Request.COMMAND_FACTORY_RESET:
+            try:
+                os.unlink(DemoApplication.REGISTER_FILE)  # Reset to defaults by removing the register file.
+            except OSError:  # Do nothing if already removed.
+                pass
             return uavcan.node.ExecuteCommand_1_1.Response(uavcan.node.ExecuteCommand_1_1.Response.STATUS_SUCCESS)
-
-        if request.command == 23456:
-            parameter_text = request.parameter.tobytes().decode()
-            logging.info("Custom command parameter: %s", parameter_text)
-            return uavcan.node.ExecuteCommand_1_1.Response(uavcan.node.ExecuteCommand_1_1.Response.STATUS_SUCCESS)
-
         return uavcan.node.ExecuteCommand_1_1.Response(uavcan.node.ExecuteCommand_1_1.Response.STATUS_BAD_COMMAND)
 
     async def run(self) -> None:
         """
-        The main method that runs the business logic.
-        It is also possible to use the library in an IoC-style by using receive_in_background() for all subscriptions
-        if desired. Here, we use a more direct approach to illustrate various possibilities.
+        The main method that runs the business logic. It is also possible to use the library in an IoC-style
+        by using receive_in_background() for all subscriptions if desired.
         """
         from pyuavcan.application.register import Value, Real32
 
@@ -176,7 +161,6 @@ class DemoApplication:
         self._sub_t_sp.receive_in_background(on_setpoint)  # IoC-style handler.
 
         # Read the application settings from the registry.
-        # Every register is exposed via uavcan.register.Access to other nodes so they can reconfigure this application.
         gain_p, _gain_i, _gain_d = self._node.registry["thermostat.pid.gains"].floats
 
         # This loop will exit automatically when the node is close()d. It is also possible to use receive() instead.
@@ -199,5 +183,7 @@ if __name__ == "__main__":
     app = DemoApplication()
     try:
         asyncio.get_event_loop().run_until_complete(app.run())
+    except KeyboardInterrupt:
+        pass
     finally:
         app.close()

@@ -298,7 +298,7 @@ class Node:
         register_file: Union[None, str, Path] = None,
         environment_variables: Optional[Dict[str, str]] = None,
         *,
-        require_redundant_transport: bool = False,
+        reconfigurable_transport: bool = False,
     ) -> Node:
         from .register.backend.sqlite import SQLiteBackend
 
@@ -307,10 +307,7 @@ class Node:
         try:
             for name, value in register.parse_environment_variables(environment_variables):
                 db.set(name, value)
-            transport = _construct_transport_from_registers(
-                registry,
-                require_redundant_transport=require_redundant_transport,
-            )
+            transport = _construct_transport_from_registers(registry, reconfigurable=reconfigurable_transport)
             return Node(
                 Presentation(transport),
                 info,
@@ -324,7 +321,7 @@ class Node:
 def _construct_transport_from_registers(
     registry: register.Registry,
     *,
-    require_redundant_transport: bool,
+    reconfigurable: bool,
 ) -> pyuavcan.transport.Transport:
     # noinspection PyPep8Naming
     Ty = TypeVar("Ty", int, float, bool, str, bytes)
@@ -402,7 +399,7 @@ def _construct_transport_from_registers(
             yield LoopbackTransport(node_id)
 
     transports = *udp(), *serial(), *can(), *loopback()
-    if not require_redundant_transport:
+    if not reconfigurable:
         if not transports:
             raise register.MissingRegisterError(
                 f"The available registers do not encode a valid transport configuration. "
