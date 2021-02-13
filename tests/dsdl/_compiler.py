@@ -22,9 +22,7 @@ def _unittest_module_import_path_usage_suggestion(caplog: typing.Any) -> None:
     output_directory = tempfile.TemporaryDirectory()
     output_directory_name = pathlib.Path(output_directory.name).resolve()
     caplog.clear()
-    pyuavcan.dsdl.compile(
-        DEMO_DIR / "public_regulated_data_types" / "uavcan", output_directory=output_directory.name
-    )
+    pyuavcan.dsdl.compile(DEMO_DIR / "public_regulated_data_types" / "uavcan", output_directory=output_directory.name)
     logs = caplog.record_tuples
     print("Captured log entries:", logs, sep="\n")
     for e in logs:

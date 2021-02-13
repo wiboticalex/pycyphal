@@ -45,9 +45,7 @@ class _TypeTestStatistics:
         return max(self.mean_serialization_time, self.mean_deserialization_time)
 
 
-def _unittest_slow_random(
-    compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any
-) -> None:
+def _unittest_slow_random(compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any) -> None:
     _logger.info(
         "Number of random samples: %s. Set the environment variable PYUAVCAN_TEST_NUM_RANDOM_SAMPLES to override.",
         _NUM_RANDOM_SAMPLES,

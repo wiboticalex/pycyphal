@@ -3,14 +3,18 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
+import sys
 from fnmatch import fnmatchcase
 from typing import List, TypeVar, Optional, Iterator, Iterable
-from collections.abc import Mapping
 import logging
 import pyuavcan
 from . import backend
 from ._value import RelaxedValue, ValueProxy, Value
 
+if sys.version_info >= (3, 9):
+    from collections.abc import Mapping
+else:  # pragma: no cover
+    from typing import Mapping
 
 PrimitiveType = TypeVar("PrimitiveType", bound=pyuavcan.dsdl.CompositeObject)
 
