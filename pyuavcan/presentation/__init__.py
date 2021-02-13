@@ -50,7 +50,7 @@ This example is based on a simple loopback transport that does not interact with
 (it doesn't perform IO with the OS), which makes it well-suited for demo needs.
 
 ..  doctest::
-    :hidden:
+    :hide:
 
     >>> import tests
     >>> _ = tests.dsdl.compile()

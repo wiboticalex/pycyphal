@@ -123,7 +123,7 @@ def make_transport_from_registers(
         - An instance of :class:`pyuavcan.transport.RedundantTransport` if more than one transport
           configuration is defined.
 
-        If True, then the returned instance is ALWAYS of type :class:`pyuavcan.transport.RedundantTransport`,
+        If True, then the returned instance is always of type :class:`pyuavcan.transport.RedundantTransport`,
         where the set of inferiors is empty if no transport configuration is defined.
         This case is intended for applications that may want to change the transport configuration afterwards.
 
@@ -139,6 +139,41 @@ def make_transport_from_registers(
     >>> tr = make_transport_from_registers(reg)
     >>> tr
     UDPTransport('127.99.1.1', local_node_id=257, ...)
+    >>> tr.close()
+    >>> tr = make_transport_from_registers(reg, reconfigurable=True)    # Same but reconfigurable.
+    >>> tr                                                              # Wrapped into RedundantTransport.
+    RedundantTransport(UDPTransport('127.99.1.1', local_node_id=257, ...))
+    >>> tr.close()
+
+    >>> reg = {                                                         # Triply-redundant heterogeneous transport:
+    ...     "uavcan.udp.ip":      Value(string=String("127.99.0.15 127.111.0.15")),     # Double UDP transport
+    ...     "uavcan.serial.port": Value(string=String("socket://localhost:50905")),     # Single serial transport
+    ... }
+    >>> tr = make_transport_from_registers(reg)     # The node-ID was not set, so the transport is anonymous.
+    >>> tr                                          # doctest: +NORMALIZE_WHITESPACE
+    RedundantTransport(UDPTransport('127.99.0.15',  local_node_id=None, ...),
+                       UDPTransport('127.111.0.15', local_node_id=None, ...),
+                       SerialTransport('socket://localhost:50905', local_node_id=None, ...))
+    >>> tr.close()
+
+    >>> reg = {
+    ...     "uavcan.can.iface":   Value(string=String("virtual: virtual:")),
+    ...     "uavcan.can.mtu":     Value(natural16=Natural16([64])),
+    ...     "uavcan.can.bitrate": Value(natural16=Natural16([1_000_000, 4_000_000])),
+    ...     "uavcan.node.id":     Value(natural16=Natural16([123])),
+    ... }
+    >>> tr = make_transport_from_registers(reg)
+    >>> tr                                          # doctest: +NORMALIZE_WHITESPACE
+    RedundantTransport(CANTransport(PythonCANMedia('virtual:', mtu=64), local_node_id=123),
+                       CANTransport(PythonCANMedia('virtual:', mtu=64), local_node_id=123))
+    >>> tr.close()
+
+    >>> tr = make_transport_from_registers({})
+    >>> tr is None
+    True
+    >>> tr = make_transport_from_registers({}, reconfigurable=True)
+    >>> tr                  # Redundant transport with no inferiors.
+    RedundantTransport()
     """
 
     def get(name: str, ty: Type[_RegisterType]) -> Optional[_RegisterType]:

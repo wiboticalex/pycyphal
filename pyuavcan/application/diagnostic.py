@@ -94,7 +94,7 @@ class DiagnosticPublisher(logging.Handler):
     Here's a usage example. Set up test rigging:
 
     ..  doctest::
-        :hidden:
+        :hide:
 
         >>> import tests
         >>> _ = tests.dsdl.compile()

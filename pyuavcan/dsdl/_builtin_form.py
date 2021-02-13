@@ -22,7 +22,7 @@ def to_builtin(obj: CompositeObject) -> typing.Dict[str, typing.Any]:
     This is intended for use with JSON, YAML, and other serialization formats.
 
     ..  doctest::
-        :hidden:
+        :hide:
 
         >>> import tests
         >>> _ = tests.dsdl.compile()

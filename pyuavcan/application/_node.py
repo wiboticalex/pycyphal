@@ -339,26 +339,31 @@ class Node:
         transport: Optional[pyuavcan.transport.Transport] = None,
         reconfigurable_transport: bool = False,
     ) -> Node:
+        from pyuavcan.transport.redundant import RedundantTransport
         from .register.backend.sqlite import SQLiteBackend
         from ._transport_factory import make_transport_from_registers
+
+        def init_transport() -> pyuavcan.transport.Transport:
+            if transport is None:
+                out = make_transport_from_registers(registry, reconfigurable=reconfigurable_transport)
+                if out is not None:
+                    return out
+                raise register.MissingRegisterError(
+                    f"Available registers do not encode a valid transport configuration: {list(registry)}"
+                )
+            if not isinstance(transport, RedundantTransport) and reconfigurable_transport:
+                out = RedundantTransport()
+                out.attach_inferior(transport)
+                return out
+            return transport
 
         db = SQLiteBackend(register_file or "")
         registry = register.Registry([db])
         try:
             for name, value in register.parse_environment_variables(environment_variables):
                 db.set(name, value)
-
-            if transport is None:
-                transport = make_transport_from_registers(registry, reconfigurable=reconfigurable_transport)
-            if transport is None:
-                raise register.MissingRegisterError(
-                    f"The available registers do not encode a valid transport configuration. "
-                    f"Their names are: {list(registry)}"
-                )
-            assert isinstance(transport, pyuavcan.transport.Transport)
-
             return Node(
-                Presentation(transport),
+                Presentation(init_transport()),
                 info,
                 register_file,
                 environment_variables=environment_variables,
