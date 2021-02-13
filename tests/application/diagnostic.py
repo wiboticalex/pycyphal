@@ -24,10 +24,9 @@ async def _unittest_slow_diagnostic_subscriber(
     asyncio.get_running_loop().slow_callback_duration = 1.0
 
     node = Node(Presentation(LoopbackTransport(2222)), NodeInfo())
+    node.start()
     pub = node.make_publisher(diagnostic.Record)
-    diag = diagnostic.DiagnosticSubscriber(node)
-
-    diag.start()
+    diagnostic.DiagnosticSubscriber(node)
 
     caplog.clear()
     await pub.publish(
@@ -48,7 +47,6 @@ async def _unittest_slow_diagnostic_subscriber(
     else:
         assert False, "Expected log message not captured"
 
-    diag.close()
     pub.close()
     node.close()
     await asyncio.sleep(1.0)  # Let the background tasks terminate.

@@ -15,7 +15,6 @@ from typing import Optional
 from uavcan.diagnostic import Record_1_1 as Record
 from uavcan.diagnostic import Severity_1_0 as Severity
 import pyuavcan
-from ._function import Function
 
 
 __all__ = ["DiagnosticSubscriber", "DiagnosticPublisher", "Record", "Severity"]
@@ -24,12 +23,10 @@ __all__ = ["DiagnosticSubscriber", "DiagnosticPublisher", "Record", "Severity"]
 _logger = logging.getLogger(__name__)
 
 
-class DiagnosticSubscriber(Function):
+class DiagnosticSubscriber:
     """
-    When started, subscribes to ``uavcan.diagnostic.Record``
-    and forwards every received message into the standard Python ``logging`` facility.
+    Subscribes to ``uavcan.diagnostic.Record`` and forwards every received message into Python's :mod:`logging`.
     The logger name is that of the current module.
-
     The log level is mapped as follows:
 
     +-------------------------------+-------------------+
@@ -68,18 +65,11 @@ class DiagnosticSubscriber(Function):
     }
 
     def __init__(self, node: pyuavcan.application.Node):
-        self._node = node
-        self._sub_record = node.make_subscriber(Record)
-
-    @property
-    def node(self) -> pyuavcan.application.Node:
-        return self._node
-
-    def start(self) -> None:
-        self._sub_record.receive_in_background(self._on_message)
-
-    def close(self) -> None:
-        self._sub_record.close()
+        sub_record = node.make_subscriber(Record)
+        node.add_lifetime_hooks(
+            lambda: sub_record.receive_in_background(self._on_message),
+            sub_record.close,
+        )
 
     async def _on_message(self, msg: Record, meta: pyuavcan.transport.TransferFrom) -> None:
         node_id = meta.source_node_id if meta.source_node_id is not None else "anonymous"
@@ -93,7 +83,7 @@ class DiagnosticSubscriber(Function):
         _logger.log(level, log_text)
 
 
-class DiagnosticPublisher(logging.Handler, Function):
+class DiagnosticPublisher(logging.Handler):
     # noinspection PyTypeChecker,PyUnresolvedReferences
     """
     Implementation of :class:`logging.Handler` that forwards all log messages via the standard
@@ -108,6 +98,7 @@ class DiagnosticPublisher(logging.Handler, Function):
     >>> from pyuavcan.presentation import Presentation
     >>> from pyuavcan.application import Node, NodeInfo
     >>> node = Node(Presentation(LoopbackTransport(1)), NodeInfo())
+    >>> node.start()
 
     Instantiate publisher and install it with the logging system:
 
@@ -116,7 +107,6 @@ class DiagnosticPublisher(logging.Handler, Function):
     >>> diagnostic_pub.timestamping_enabled = True  # This is only allowed if the UAVCAN network uses the wall clock.
     >>> diagnostic_pub.timestamping_enabled
     True
-    >>> diagnostic_pub.start()  # Messages will not be forwarded until started.
 
     Test it:
 
@@ -131,16 +121,26 @@ class DiagnosticPublisher(logging.Handler, Function):
     Don't forget to remove it afterwards:
 
     >>> logging.root.removeHandler(diagnostic_pub)
-    >>> diagnostic_pub.close()
+    >>> node.close()
     """
 
     def __init__(self, node: pyuavcan.application.Node, level: int = logging.WARNING) -> None:
-        self._node = node
-        self._pub = self.node.make_publisher(Record)
+        self._pub = node.make_publisher(Record)
         self._fut: Optional[asyncio.Future[None]] = None
         self._forward_timestamp = False
         self._started = False
         super().__init__(level)
+
+        def start() -> None:
+            self._started = True
+
+        def close() -> None:
+            self._started = False
+            self._pub.close()
+            if self._fut is not None:
+                self._fut.result()
+
+        node.add_lifetime_hooks(start, close)
 
     @property
     def timestamping_enabled(self) -> bool:
@@ -155,31 +155,12 @@ class DiagnosticPublisher(logging.Handler, Function):
     def timestamping_enabled(self, value: bool) -> None:
         self._forward_timestamp = bool(value)
 
-    @property
-    def node(self) -> pyuavcan.application.Node:
-        return self._node
-
-    def start(self) -> None:
-        """
-        Before starting all log records submitted to :meth:`emit` will be silently dropped.
-        """
-        self._started = True
-
-    def close(self) -> None:
-        """
-        After closure all log records submitted to :meth:`emit` will be silently dropped.
-        """
-        self._started = False
-        self._pub.close()
-        if self._fut is not None:
-            self._fut.result()
-
     def emit(self, record: logging.LogRecord) -> None:
         """
         This method intentionally drops all low-severity messages originating from within PyUAVCAN itself
         to prevent infinite recursion through the logging system.
         """
-        if not self._started or record.module.startswith(pyuavcan.__name__) and record.levelno < logging.ERROR:
+        if not self._started or (record.module.startswith(pyuavcan.__name__) and record.levelno < logging.ERROR):
             return
 
         # Further, unconditionally drop all messages while publishing is in progress for the same reason.
@@ -198,6 +179,8 @@ class DiagnosticPublisher(logging.Handler, Function):
         try:
             if not await self._pub.publish(record):
                 print(self, "TIMEOUT", record, file=sys.stderr)  # pragma: no cover
+        except pyuavcan.transport.TransportError:
+            pass
         except Exception as ex:
             print(self, "ERROR", ex.__class__.__name__, ex, file=sys.stderr)  # pragma: no cover
 

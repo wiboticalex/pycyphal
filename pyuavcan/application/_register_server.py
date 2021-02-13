@@ -10,10 +10,9 @@ from uavcan.register import Access_1_0 as Access
 from uavcan.register import List_1_0 as List
 from uavcan.register import Name_1_0 as Name
 from .register import ValueConversionError, MissingRegisterError
-from ._function import Function
 
 
-class RegisterServer(Function):
+class RegisterServer:
     # noinspection PyUnresolvedReferences,PyTypeChecker
     """
     Implementation of the standard network service ``uavcan.register``; specifically, List and Access.
@@ -91,20 +90,23 @@ class RegisterServer(Function):
         :param node: The node instance to serve the register API for.
         """
         self._node = node
-        self._srv_list = self.node.get_server(List)
-        self._srv_access = self.node.get_server(Access)
+
+        srv_list = self.node.get_server(List)
+        srv_access = self.node.get_server(Access)
+
+        def start() -> None:
+            srv_list.serve_in_background(self._handle_list)
+            srv_access.serve_in_background(self._handle_access)
+
+        def close() -> None:
+            srv_list.close()
+            srv_access.close()
+
+        node.add_lifetime_hooks(start, close)
 
     @property
     def node(self) -> pyuavcan.application.Node:
         return self._node
-
-    def start(self) -> None:
-        self._srv_list.serve_in_background(self._handle_list)
-        self._srv_access.serve_in_background(self._handle_access)
-
-    def close(self) -> None:
-        self._srv_list.close()
-        self._srv_access.close()
 
     async def _handle_list(self, request: List.Request, metadata: ServiceRequestMetadata) -> List.Response:
         name = self.node.registry.get_name_at_index(request.index)

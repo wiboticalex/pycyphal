@@ -16,7 +16,6 @@ import asyncio
 import uavcan.node
 from uavcan.node import Heartbeat_1_0 as Heartbeat
 import pyuavcan
-from ._function import Function
 
 
 class Health(enum.IntEnum):
@@ -51,13 +50,11 @@ VENDOR_SPECIFIC_STATUS_CODE_MASK = (
 _logger = logging.getLogger(__name__)
 
 
-class HeartbeatPublisher(Function):
+class HeartbeatPublisher:
     """
     This class manages periodic publication of the node heartbeat message.
     Also it subscribes to heartbeat messages from other nodes and logs cautionary messages
     if a node-ID conflict is detected on the bus.
-
-    Instances must be manually started when initialization is finished by invoking :meth:`start`.
 
     The default states are as follows:
 
@@ -70,7 +67,6 @@ class HeartbeatPublisher(Function):
 
     def __init__(self, node: pyuavcan.application.Node):
         self._node = node
-        self._instantiated_at = time.monotonic()
         self._health = Health.NOMINAL
         self._mode = Mode.OPERATIONAL
         self._vendor_specific_status_code = 0
@@ -79,32 +75,30 @@ class HeartbeatPublisher(Function):
         self._priority = pyuavcan.presentation.DEFAULT_PRIORITY
         self._period = float(Heartbeat.MAX_PUBLICATION_PERIOD)
         self._subscriber = self._node.make_subscriber(Heartbeat)
+        self._started_at = time.monotonic()
+
+        def start() -> None:
+            if not self._maybe_task:
+                self._started_at = time.monotonic()
+                self._subscriber.receive_in_background(self._handle_received_heartbeat)
+                self._maybe_task = self.node.loop.create_task(self._task_function())
+
+        def close() -> None:
+            if self._maybe_task:
+                self._maybe_task.cancel()  # Cancel first to avoid exceptions from being logged from the task.
+                self._maybe_task = None
+                self._subscriber.close()
+
+        node.add_lifetime_hooks(start, close)
 
     @property
     def node(self) -> pyuavcan.application.Node:
         return self._node
 
-    def start(self) -> None:
-        """
-        Starts the background publishing task on the node's event loop.
-        """
-        if not self._maybe_task:
-            self._subscriber.receive_in_background(self._handle_received_heartbeat)
-            self._maybe_task = self.node.loop.create_task(self._task_function())
-
-    def close(self) -> None:
-        """
-        Closes the publisher, the subscriber, and stops the internal task.
-        """
-        if self._maybe_task:
-            self._maybe_task.cancel()  # Cancel first to avoid exceptions from being logged from the task.
-            self._maybe_task = None
-            self._subscriber.close()
-
     @property
     def uptime(self) -> float:
         """The current amount of time, in seconds, elapsed since the object was instantiated."""
-        out = time.monotonic() - self._instantiated_at
+        out = time.monotonic() - self._started_at
         assert out >= 0
         return out
 

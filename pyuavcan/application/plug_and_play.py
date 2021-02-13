@@ -13,7 +13,7 @@ To avoid this, the Specification requires that PnP nodes and static nodes are no
 
 from __future__ import annotations
 import abc
-import typing
+from typing import Optional, Union, Any
 import random
 import asyncio
 import pathlib
@@ -23,7 +23,6 @@ from uavcan.pnp import NodeIDAllocationData_1_0 as NodeIDAllocationData_1
 from uavcan.pnp import NodeIDAllocationData_2_0 as NodeIDAllocationData_2
 from uavcan.node import ID_1_0 as ID
 import pyuavcan
-from ._function import Function
 
 
 _PSEUDO_UNIQUE_ID_MASK = (
@@ -37,39 +36,49 @@ _UNIQUE_ID_SIZE_BYTES = pyuavcan.application.NodeInfo().unique_id.size
 _NUM_RESERVED_TOP_NODE_IDS = 2
 
 _DB_DEFAULT_LOCATION = ":memory:"
-_DB_TIMEOUT = 0.1
+_DB_TIMEOUT = 1.0
 
 
 _logger = logging.getLogger(__name__)
 
 
-class Allocatee(Function):
+class Allocatee:
     """
     Plug-and-play node-ID protocol client.
 
     This class represents a node that requires an allocated node-ID.
     Once started, the client will keep issuing node-ID allocation requests until either a node-ID is granted
-    or until the node-ID of the underlying transport instance ceases to be anonymous (that could happen if the
-    transport is re-configured externally).
+    or until the node-ID of the specified transport instance ceases to be anonymous
+    (that could happen if the transport is re-configured by the application locally).
     The status (whether the allocation is finished or still in progress) is to be queried periodically
     via the method :meth:`get_result`.
 
     Uses v1 allocation messages if the transport MTU is small (like if the transport is Classic CAN).
     Switches between v1 and v2 as necessary on the fly if the transport is reconfigured at runtime.
+
+    Unlike other application-layer function implementations, this class takes a transport instance directly
+    instead of a node because it is expected to be used before the node object is constructed.
     """
 
     DEFAULT_PRIORITY = pyuavcan.transport.Priority.SLOW
 
     _MTU_THRESHOLD = max(pyuavcan.dsdl.get_model(NodeIDAllocationData_2).bit_length_set) // 8
 
-    def __init__(self, node: pyuavcan.application.Node, preferred_node_id: typing.Optional[int] = None):
+    def __init__(
+        self,
+        transport_or_presentation: Union[pyuavcan.transport.Transport, pyuavcan.presentation.Presentation],
+        local_unique_id: bytes,
+        preferred_node_id: Optional[int] = None,
+    ):
         """
-        :param node:
-            The local node instance to use.
-            If the underlying transport is not anonymous (i.e., a node-ID is already set),
+        :param transport_or_presentation:
+            The transport to run the allocation client on, or the presentation instance constructed on it.
+            If the transport is not anonymous (i.e., a node-ID is already set),
             the allocatee will simply return the existing node-ID and do nothing.
 
-            The 128-bit globally unique-ID of the local node will be sourced from the provided node instance.
+        :param local_unique_id:
+            The 128-bit globally unique-ID of the local node; the same value is also contained
+            in ``uavcan.node.GetInfo.Response``.
             Beware that random generation of the unique-ID at every launch is a bad idea because it will
             exhaust the allocation table quickly.
             Refer to the Specification for details.
@@ -79,48 +88,60 @@ class Allocatee(Function):
             If provided, the PnP allocator will try to find a node-ID that is close to the stated preference.
             If not provided, the PnP allocator will pick a node-ID at its own discretion.
         """
-        self._node = node
+        if isinstance(transport_or_presentation, pyuavcan.transport.Transport):
+            self._transport = transport_or_presentation
+            self._presentation = pyuavcan.presentation.Presentation(self._transport)
+        elif isinstance(transport_or_presentation, pyuavcan.presentation.Presentation):
+            self._transport = transport_or_presentation.transport
+            self._presentation = transport_or_presentation
+        else:  # pragma: no cover
+            raise TypeError(f"Expected transport or presentation controller, found {type(transport_or_presentation)}")
+
+        self._local_unique_id = local_unique_id
         self._preferred_node_id = int(preferred_node_id if preferred_node_id is not None else _NODE_ID_MASK)
+        if not isinstance(self._local_unique_id, bytes) or len(self._local_unique_id) != _UNIQUE_ID_SIZE_BYTES:
+            raise ValueError(f"Invalid unique-ID: {self._local_unique_id!r}")
         if not (0 <= self._preferred_node_id <= _NODE_ID_MASK):
             raise ValueError(f"Invalid preferred node-ID: {self._preferred_node_id}")
 
-        self._result: typing.Optional[int] = None
-        self._sub_1 = self.node.make_subscriber(NodeIDAllocationData_1)
-        self._sub_2 = self.node.make_subscriber(NodeIDAllocationData_2)
-        self._pub: typing.Union[
+        self._result: Optional[int] = None
+        self._sub_1 = self._presentation.make_subscriber_with_fixed_subject_id(NodeIDAllocationData_1)
+        self._sub_2 = self._presentation.make_subscriber_with_fixed_subject_id(NodeIDAllocationData_2)
+        self._pub: Union[
             None,
             pyuavcan.presentation.Publisher[NodeIDAllocationData_1],
             pyuavcan.presentation.Publisher[NodeIDAllocationData_2],
         ] = None
-        self._timer: typing.Optional[asyncio.TimerHandle] = None
+        self._timer: Optional[asyncio.TimerHandle] = None
 
-    @property
-    def node(self) -> pyuavcan.application.Node:
-        return self._node
-
-    def get_result(self) -> typing.Optional[int]:
-        """
-        None if the allocation is still in progress. If the allocation is finished, this is the allocated node-ID.
-        """
-        res = self.node.id
-        return res if res is not None else self._result
-
-    def start(self) -> None:
         self._sub_1.receive_in_background(self._on_response)
         self._sub_2.receive_in_background(self._on_response)
         self._restart_timer()
 
+    @property
+    def presentation(self) -> pyuavcan.presentation.Presentation:
+        return self._presentation
+
+    def get_result(self) -> Optional[int]:
+        """
+        None if the allocation is still in progress. If the allocation is finished, this is the allocated node-ID.
+        """
+        res = self.presentation.transport.local_node_id
+        return res if res is not None else self._result
+
     def close(self) -> None:
         """
-        The instance automatically closes itself shortly after the allocation is finished,
+        Stop the allocation process. The allocatee automatically closes itself shortly after the allocation is finished,
         so it's not necessary to invoke this method after a successful allocation. The method is idempotent.
         """
         if self._timer is not None:
             self._timer.cancel()
+            self._timer = None
         self._sub_1.close()
         self._sub_2.close()
         if self._pub is not None:
             self._pub.close()
+            self._pub = None
 
     def _on_timer(self) -> None:
         self._restart_timer()
@@ -128,9 +149,9 @@ class Allocatee(Function):
             self.close()
             return
 
-        msg: typing.Any = None
+        msg: Any = None
         try:
-            if self.node.presentation.transport.protocol_parameters.mtu > self._MTU_THRESHOLD:
+            if self.presentation.transport.protocol_parameters.mtu > self._MTU_THRESHOLD:
                 msg = NodeIDAllocationData_2(node_id=ID(self._preferred_node_id), unique_id=self._local_unique_id)
             else:
                 msg = NodeIDAllocationData_1(unique_id_hash=_make_pseudo_unique_id(self._local_unique_id))
@@ -138,7 +159,7 @@ class Allocatee(Function):
             if self._pub is None or self._pub.dtype != type(msg):
                 if self._pub is not None:
                     self._pub.close()
-                self._pub = self.node.make_publisher(type(msg))
+                self._pub = self.presentation.make_publisher_with_fixed_subject_id(type(msg))
                 self._pub.priority = self.DEFAULT_PRIORITY
 
             _logger.debug("Publishing allocation request %s", msg)
@@ -148,15 +169,10 @@ class Allocatee(Function):
 
     def _restart_timer(self) -> None:
         t_request = random.random()
-        self._timer = self.node.loop.call_later(t_request, self._on_timer)
-
-    @property
-    def _local_unique_id(self) -> bytes:
-        """Convenience alias."""
-        return self.node.info.unique_id.tobytes()
+        self._timer = self.presentation.loop.call_later(t_request, self._on_timer)
 
     async def _on_response(
-        self, msg: typing.Union[NodeIDAllocationData_1, NodeIDAllocationData_2], meta: pyuavcan.transport.TransferFrom
+        self, msg: Union[NodeIDAllocationData_1, NodeIDAllocationData_2], meta: pyuavcan.transport.TransferFrom
     ) -> None:
         if self.get_result() is not None:  # Allocation already done, nothing else to do.
             return
@@ -164,7 +180,7 @@ class Allocatee(Function):
         if meta.source_node_id is None:  # Another request, ignore.
             return
 
-        allocated: typing.Optional[int] = None
+        allocated: Optional[int] = None
         if isinstance(msg, NodeIDAllocationData_1):
             if msg.unique_id_hash == _make_pseudo_unique_id(self._local_unique_id) and len(msg.allocated_node_id) > 0:
                 allocated = msg.allocated_node_id[0].value
@@ -178,7 +194,7 @@ class Allocatee(Function):
             return  # UID mismatch.
 
         assert isinstance(allocated, int)
-        protocol_params = self.node.presentation.transport.protocol_parameters
+        protocol_params = self.presentation.transport.protocol_parameters
         max_node_id = min(protocol_params.max_nodes - 1, _NODE_ID_MASK)
         if not (0 <= allocated <= max_node_id):
             _logger.warning(
@@ -192,7 +208,7 @@ class Allocatee(Function):
         self._result = allocated
 
 
-class Allocator(Function):
+class Allocator:
     """
     An abstract PnP allocator interface. See derived classes.
 
@@ -208,7 +224,7 @@ class Allocator(Function):
     """
 
     @abc.abstractmethod
-    def register_node(self, node_id: int, unique_id: typing.Optional[bytes]) -> None:
+    def register_node(self, node_id: int, unique_id: Optional[bytes]) -> None:
         """
         This method shall be invoked whenever a new node appears online and/or whenever its unique-ID is obtained.
         The recommended usage pattern is to subscribe to the update events from
@@ -225,7 +241,7 @@ class CentralizedAllocator(Allocator):
     def __init__(
         self,
         node: pyuavcan.application.Node,
-        database_file: typing.Optional[typing.Union[str, pathlib.Path]] = None,
+        database_file: Optional[Union[str, pathlib.Path]] = None,
     ):
         """
         :param node:
@@ -251,26 +267,28 @@ class CentralizedAllocator(Allocator):
         self._pub1.send_timeout = self.DEFAULT_PUBLICATION_TIMEOUT
         self._pub2.send_timeout = self.DEFAULT_PUBLICATION_TIMEOUT
 
+        def start() -> None:
+            _logger.debug("Centralized allocator starting with the following allocation table:\n%s", self._alloc)
+            self._sub1.receive_in_background(self._on_message)
+            self._sub2.receive_in_background(self._on_message)
+
+        def close() -> None:
+            for port in [self._sub1, self._sub2, self._pub1, self._pub2]:
+                assert isinstance(port, pyuavcan.presentation.Port)
+                port.close()
+            self._alloc.close()
+
+        node.add_lifetime_hooks(start, close)
+
     @property
     def node(self) -> pyuavcan.application.Node:
         return self._node
 
-    def register_node(self, node_id: int, unique_id: typing.Optional[bytes]) -> None:
+    def register_node(self, node_id: int, unique_id: Optional[bytes]) -> None:
         self._alloc.register(node_id, unique_id)
 
-    def start(self) -> None:
-        _logger.debug("Centralized allocator starting with the following allocation table:\n%s", self._alloc)
-        self._sub1.receive_in_background(self._on_message)
-        self._sub2.receive_in_background(self._on_message)
-
-    def close(self) -> None:
-        for port in [self._sub1, self._sub2, self._pub1, self._pub2]:
-            assert isinstance(port, pyuavcan.presentation.Port)
-            port.close()
-        self._alloc.close()
-
     async def _on_message(
-        self, msg: typing.Union[NodeIDAllocationData_1, NodeIDAllocationData_2], meta: pyuavcan.transport.TransferFrom
+        self, msg: Union[NodeIDAllocationData_1, NodeIDAllocationData_2], meta: pyuavcan.transport.TransferFrom
     ) -> None:
         if meta.source_node_id is not None:
             _logger.error(  # pylint: disable=logging-fstring-interpolation
@@ -345,7 +363,7 @@ class _AllocationTable:
         self._con.execute(self._SCHEMA)
         self._con.commit()
 
-    def register(self, node_id: int, unique_id: typing.Optional[bytes]) -> None:
+    def register(self, node_id: int, unique_id: Optional[bytes]) -> None:
         unique_id_defined = unique_id is not None
         if unique_id is None:
             unique_id = bytes(_UNIQUE_ID_SIZE_BYTES)
@@ -377,9 +395,9 @@ class _AllocationTable:
         self,
         preferred_node_id: int,
         max_node_id: int,
-        unique_id: typing.Optional[bytes] = None,
-        pseudo_unique_id: typing.Optional[int] = None,
-    ) -> typing.Optional[int]:
+        unique_id: Optional[bytes] = None,
+        pseudo_unique_id: Optional[int] = None,
+    ) -> Optional[int]:
         use_unique_id = unique_id is not None
         preferred_node_id = min(max(preferred_node_id, 0), max_node_id)
         _logger.debug(
@@ -420,7 +438,7 @@ class _AllocationTable:
             return candidate
 
         # Do a new allocation. Consider re-implementing this in pure SQL -- should be possible with SQLite.
-        result: typing.Optional[int] = None
+        result: Optional[int] = None
         candidate = preferred_node_id
         while result is None and candidate <= max_node_id:
             if self._try_allocate(candidate, unique_id, pseudo_unique_id):

@@ -13,7 +13,6 @@ import pyuavcan
 from pyuavcan.presentation import Presentation, ServiceRequestMetadata, Publisher, Subscriber, Server, Client
 from . import heartbeat_publisher
 from . import register
-from ._function import Function
 
 
 NodeInfo = uavcan.node.GetInfo_1_0.Response
@@ -31,10 +30,15 @@ class Node:
     This class automatically instantiates the following application-layer function implementations:
 
     - :class:`heartbeat_publisher.HeartbeatPublisher`
-    - :class:`register.RegisterServer`
-    - read the attribute documentation for further details.
+    - The register API server.
+    - The ``uavcan.node.GetInfo`` server.
+
+    If the provided transport is anonymous and it is unable to construct service ports in anonymous mode,
+    then RPC-services (like GetInfo, register API, etc.) are not initialized.
+    Read the attribute documentation for further details.
 
     Start the instance when initialization is finished by invoking :meth:`start`.
+    This will also automatically start all function implementation instances like the heartbeat publisher, etc.
     """
 
     def __init__(
@@ -74,7 +78,8 @@ class Node:
         self._presentation = presentation
         self._info = info
         self._started = False
-        self._functions: List[Function] = []
+        self._on_start: List[Callable[[], None]] = []
+        self._on_close: List[Callable[[], None]] = []
 
         from .register.backend.sqlite import SQLiteBackend
         from .register.backend.dynamic import DynamicBackend
@@ -85,14 +90,22 @@ class Node:
         for name, value in register.parse_environment_variables(environment_variables):
             self.create_register(name, value, overwrite=True)
 
-        self._srv_info = self.get_server(uavcan.node.GetInfo_1_0)
+        self._heartbeat_publisher = heartbeat_publisher.HeartbeatPublisher(self)
         self._init_functions()
 
     def _init_functions(self) -> None:
         from ._register_server import RegisterServer
 
-        self._attach_function(heartbeat_publisher.HeartbeatPublisher(self))
-        self._attach_function(RegisterServer(self))
+        async def handle_get_info(_req: uavcan.node.GetInfo_1_0.Request, _meta: ServiceRequestMetadata) -> NodeInfo:
+            return self.info
+
+        try:
+            RegisterServer(self)
+            srv_info = self.get_server(uavcan.node.GetInfo_1_0)
+        except pyuavcan.transport.OperationNotDefinedForAnonymousNodeError as ex:
+            _logger.info("%r: RPC-servers not launched because the transport is anonymous: %s", ex)
+        else:
+            self.add_lifetime_hooks(lambda: srv_info.serve_in_background(handle_get_info), srv_info.close)
 
     @property
     def presentation(self) -> Presentation:
@@ -274,25 +287,19 @@ class Node:
     @property
     def heartbeat_publisher(self) -> heartbeat_publisher.HeartbeatPublisher:
         """Provides access to the heartbeat publisher instance of this node."""
-        for fun in self._functions:
-            if isinstance(fun, heartbeat_publisher.HeartbeatPublisher):
-                return fun
-        assert False
+        return self._heartbeat_publisher
 
     def start(self) -> None:
         """
-        Starts the GetInfo server in the background, the heartbeat publisher, etc.
+        Starts this node and all application-layer function implementations that are initialized on it
+        (like the heartbeat publisher, diagnostics, and basically anything that takes a node reference in its
+        constructor).
         Those will be automatically terminated when the node is closed.
         Does nothing if already started.
         """
-
-        async def _handle_get_info(_req: uavcan.node.GetInfo_1_0.Request, _meta: ServiceRequestMetadata) -> NodeInfo:
-            return self._info
-
         if not self._started:
-            for fun in self._functions:
-                fun.start()
-            self._srv_info.serve_in_background(_handle_get_info)
+            for fun in self._on_start:  # First failure aborts the start.
+                fun()
             self._started = True
 
     def close(self) -> None:
@@ -302,29 +309,24 @@ class Node:
         The user does not have to close every port manually as it will be done automatically.
         """
         try:
-            for fun in self._functions:
-                try:
-                    fun.close()
-                except Exception as ex:  # pragma: no cover
-                    _logger.exception("%r: Failed to close %r: %s", self, fun, ex)
-            self._srv_info.close()
+            pyuavcan.util.broadcast(self._on_close)()
             self._registry.close()
         finally:
             self._presentation.close()
 
-    def _attach_function(self, fun: Function) -> None:
+    def add_lifetime_hooks(self, start: Optional[Callable[[], None]], close: Optional[Callable[[], None]]) -> None:
         """
-        Attached functions are automatically :meth:`Function.start`-ed when this node is :meth:`start`-ed.
-        If the node is already started when a new function is attached, the function is started immediately.
-        Likewise, when the node is closed, all functions are closed.
-
-        :raises: :class:`ValueError` if :attr:`Function.node` of the added function is not this node.
+        The start hook will be invoked when this node is :meth:`start`-ed.
+        If the node is already started when this method is invoked, the start hook is called immediately.
+        The close hook is invoked when this node is :meth:`close`-d.
         """
-        if self is not fun.node:
-            raise ValueError("This function belongs to a different node")
-        if self._started:
-            fun.start()
-        self._functions.append(fun)
+        if start:
+            if self._started:
+                start()
+            else:
+                self._on_start.append(start)
+        if close:
+            self._on_close.append(close)
 
     def __repr__(self) -> str:
         return pyuavcan.util.repr_attributes(self, self._info, self._presentation, self.registry)
