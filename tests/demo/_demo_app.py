@@ -8,7 +8,7 @@ import math
 import shutil
 from typing import Iterable, Dict, Iterator, Tuple, List
 import asyncio
-import pathlib
+from pathlib import Path
 import dataclasses
 import pytest
 import pyuavcan
@@ -88,7 +88,7 @@ async def _unittest_slow_demo_app(
         # At the first run, force the demo script to regenerate packages.
         # The following runs shall not force this behavior to save time and enhance branch coverage.
         print("FORCE DSDL RECOMPILATION")
-        for p in pathlib.Path(".compiled").resolve().glob("pyuavcan_*"):
+        for p in Path().cwd().resolve().glob(".demo_app.*.compiled"):
             shutil.rmtree(p)
 
     # The demo may need to generate packages as well, so we launch it first.
@@ -117,7 +117,7 @@ async def _unittest_slow_demo_app(
         environment_variables=env,
     )
     assert demo_proc.alive
-    print("DEMO APP STARTED WITH PID", demo_proc.pid, "FROM", pathlib.Path.cwd())
+    print("DEMO APP STARTED WITH PID", demo_proc.pid, "FROM", Path.cwd())
 
     try:
         local_node_info = uavcan.node.GetInfo_1_0.Response(

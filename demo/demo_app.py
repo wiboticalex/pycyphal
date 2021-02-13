@@ -15,7 +15,7 @@ import pyuavcan
 # and shard its contents by the library version number. The sharding ensures that we won't attempt to use a package
 # compiled for an older library version with a newer one, as they may be incompatible. When packaging applications
 # for distribution, consider including transcompiled packages rather than generating them at runtime.
-dsdl_compiled_dir = pathlib.Path(".compiled", f"pyuavcan_{pyuavcan.__version__}").resolve()
+dsdl_compiled_dir = pathlib.Path(f".demo_app.pyuavcan{pyuavcan.__version__}.compiled").resolve()
 
 # We will need to import the packages once they are compiled, so we should update the module import look-up path set.
 # If you're using an IDE for development, add this path to its look-up set as well for code completion to work.
