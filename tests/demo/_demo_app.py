@@ -16,7 +16,7 @@ from ._subprocess import BackgroundChildProcess
 
 
 DEMO_APP_NODE_ID = 42
-DEMO_DIR = pathlib.Path(__file__).absolute().parent.parent.parent / "demo"
+DEMO_DIR = Path(__file__).absolute().parent.parent.parent / "demo"
 
 
 def mirror(env: Dict[str, str]) -> Dict[str, str]:
