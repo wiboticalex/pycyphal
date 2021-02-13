@@ -200,7 +200,7 @@ class HeartbeatPublisher:
                         assert pub is not None
                         pub.priority = self._priority
                         if not await pub.publish(self.make_message()):
-                            _logger.error("%s heartbeat send timed out", self)
+                            _logger.warning("%s heartbeat send timed out", self)
                 except Exception as ex:  # pragma: no cover
                     if (
                         isinstance(ex, (asyncio.CancelledError, pyuavcan.transport.ResourceClosedError))
@@ -221,7 +221,7 @@ class HeartbeatPublisher:
         local_node_id = self.node.id
         remote_node_id = metadata.source_node_id
         if local_node_id is not None and remote_node_id is not None and local_node_id == remote_node_id:
-            _logger.warning(
+            _logger.info(
                 "NODE-ID CONFLICT: There is another node on the network that uses the same node-ID %d. "
                 "Its latest heartbeat is %s with transfer metadata %s",
                 remote_node_id,
