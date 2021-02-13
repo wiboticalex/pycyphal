@@ -84,10 +84,10 @@ class ValueProxy:
     b'String implicitly converted to bytes'
     """
 
-    def __init__(self, msg: Value) -> None:
+    def __init__(self, v: Union[Value, ValueProxy]) -> None:
         from copy import copy
 
-        self._value = copy(msg)
+        self._value = copy(v if isinstance(v, Value) else v.value)
 
     @property
     def value(self) -> Value:

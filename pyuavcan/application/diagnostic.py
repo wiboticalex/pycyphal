@@ -93,6 +93,12 @@ class DiagnosticPublisher(logging.Handler):
 
     Here's a usage example. Set up test rigging:
 
+    ..  doctest::
+        :hidden:
+
+        >>> import tests
+        >>> _ = tests.dsdl.compile()
+
     >>> from asyncio import get_event_loop
     >>> from pyuavcan.transport.loopback import LoopbackTransport
     >>> from pyuavcan.presentation import Presentation

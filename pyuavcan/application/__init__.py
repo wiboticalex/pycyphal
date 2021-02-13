@@ -180,6 +180,11 @@ The registry of the node instance can be accessed via :attr:`Node.registry` whic
 >>> str(node.registry["uavcan.sub.position_setpoint.type"]) # Subscription type is automatically exposed via registry.
 'uavcan.si.unit.length.Vector3.1.0'
 
+Every port created by the application (publisher, subscriber, etc.) is automatically exposed via the register
+interface to uphold the logic of the register-based UAVCAN introspection API.
+The application therefore should not attempt to create new ports using the presentation-layer API because that
+would circumvent the introspection services.
+
 The node instance also implements the register network service (``uavcan.register.Access``, ``uavcan.register.List``)
 so other network participants can access the registry of the local node and reconfigure it.
 The application can also do that locally, of course.
@@ -284,3 +289,4 @@ More complex capabilities are to be set up by the user as needed; some of them a
 """
 
 from ._node import Node as Node, NodeInfo as NodeInfo
+from ._transport_factory import make_transport_from_registers as make_transport_from_registers

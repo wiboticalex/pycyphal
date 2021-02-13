@@ -3,8 +3,7 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Union, Callable, Tuple, Type, TypeVar, Dict, Optional, Iterator, List
-from collections.abc import Mapping
+from typing import Union, Callable, Tuple, Type, TypeVar, Dict, Optional, List
 from pathlib import Path
 import asyncio
 import logging
@@ -337,16 +336,27 @@ class Node:
         register_file: Union[None, str, Path] = None,
         environment_variables: Optional[Dict[str, str]] = None,
         *,
+        transport: Optional[pyuavcan.transport.Transport] = None,
         reconfigurable_transport: bool = False,
     ) -> Node:
         from .register.backend.sqlite import SQLiteBackend
+        from ._transport_factory import make_transport_from_registers
 
         db = SQLiteBackend(register_file or "")
         registry = register.Registry([db])
         try:
             for name, value in register.parse_environment_variables(environment_variables):
                 db.set(name, value)
-            transport = construct_transport_from_registers(registry, reconfigurable=reconfigurable_transport)
+
+            if transport is None:
+                transport = make_transport_from_registers(registry, reconfigurable=reconfigurable_transport)
+            if transport is None:
+                raise register.MissingRegisterError(
+                    f"The available registers do not encode a valid transport configuration. "
+                    f"Their names are: {list(registry)}"
+                )
+            assert isinstance(transport, pyuavcan.transport.Transport)
+
             return Node(
                 Presentation(transport),
                 info,
@@ -355,101 +365,3 @@ class Node:
             )
         finally:
             registry.close()
-
-
-def construct_transport_from_registers(
-    registers: Mapping[str, register.ValueProxy],
-    *,
-    reconfigurable: bool,
-) -> pyuavcan.transport.Transport:
-    # noinspection PyPep8Naming
-    Ty = TypeVar("Ty", int, float, bool, str, bytes)
-
-    def get(name: str, ty: Type[Ty]) -> Optional[Ty]:
-        try:
-            return ty(registers[name])
-        except KeyError:
-            return None
-
-    node_id = get("uavcan.node.id", int)
-
-    def udp() -> Iterator[pyuavcan.transport.Transport]:
-        try:
-            ip_list = str(registers["uavcan.udp.ip"]).split()
-        except KeyError:
-            return
-
-        from pyuavcan.transport.udp import UDPTransport
-
-        mtu = get("uavcan.udp.mtu", int) or min(UDPTransport.VALID_MTU_RANGE)
-        srv_mult = int(get("uavcan.udp.duplicate_service_transfers", bool) or False) + 1
-        for ip in ip_list:
-            yield UDPTransport(ip, node_id, mtu=mtu, service_transfer_multiplier=srv_mult)
-
-    def serial() -> Iterator[pyuavcan.transport.Transport]:
-        try:
-            port_list = str(registers["uavcan.serial.port"]).split()
-        except KeyError:
-            return
-
-        from pyuavcan.transport.serial import SerialTransport
-
-        srv_mult = int(get("uavcan.serial.duplicate_service_transfers", bool) or False) + 1
-        baudrate = get("uavcan.serial.baudrate", int)
-        for port in port_list:
-            yield SerialTransport(port, node_id, service_transfer_multiplier=srv_mult, baudrate=baudrate)
-
-    def can() -> Iterator[pyuavcan.transport.Transport]:
-        try:
-            iface_list = str(registers["uavcan.can.iface"]).split()
-        except KeyError:
-            return
-
-        from pyuavcan.transport.can import CANTransport
-
-        reg_mtu = "uavcan.can.mtu"
-        reg_bitrate = "uavcan.can.bitrate"
-        mtu = get(reg_mtu, int)
-        bitrate: Union[int, Tuple[int, int]]
-        try:
-            bitrate_list = registers[reg_bitrate].ints
-        except KeyError:
-            bitrate = (1_000_000, 4_000_000) if mtu is None or mtu > 8 else 1_000_000
-        else:
-            bitrate = (bitrate_list[0], bitrate_list[1]) if len(bitrate_list) > 1 else bitrate_list[0]
-
-        for iface in iface_list:
-            media: pyuavcan.transport.can.media.Media
-            if iface.lower().startswith("socketcan:"):
-                from pyuavcan.transport.can.media.socketcan import SocketCANMedia
-
-                mtu = mtu or (8 if isinstance(bitrate, int) else 64)
-                media = SocketCANMedia(iface.split(":")[-1], mtu=mtu)
-            else:
-                from pyuavcan.transport.can.media.pythoncan import PythonCANMedia
-
-                media = PythonCANMedia(iface, bitrate, mtu)
-            yield CANTransport(media, node_id)
-
-    def loopback() -> Iterator[pyuavcan.transport.Transport]:
-        if registers.get("uavcan.loopback"):
-            from pyuavcan.transport.loopback import LoopbackTransport
-
-            yield LoopbackTransport(node_id)
-
-    transports = *udp(), *serial(), *can(), *loopback()
-    if not reconfigurable:
-        if not transports:
-            raise KeyError(
-                f"The available registers do not encode a valid transport configuration. "
-                f"For reference, the defined register names are: {list(registers)}"
-            )
-        if len(transports) == 1:
-            return transports[0]
-
-    from pyuavcan.transport.redundant import RedundantTransport
-
-    red = RedundantTransport()
-    for tr in transports:
-        red.attach_inferior(tr)
-    return red
