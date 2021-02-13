@@ -8,6 +8,8 @@ import logging
 import pytest
 import pyuavcan
 
+if typing.TYPE_CHECKING:
+    import pyuavcan.application
 
 _logger = logging.getLogger(__name__)
 
@@ -18,14 +20,15 @@ async def _unittest_slow_node_tracker(
 ) -> None:
     from . import get_transport
     from pyuavcan.presentation import Presentation
+    from pyuavcan.application import Node, NodeInfo
     from pyuavcan.application.node_tracker import NodeTracker, Entry
 
     assert compiled
 
-    p_a = Presentation(get_transport(0xA))
-    p_b = Presentation(get_transport(0xB))
-    p_c = Presentation(get_transport(0xC))
-    p_trk = Presentation(get_transport(None))
+    p_a = Node(Presentation(get_transport(0xA)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.a"))
+    p_b = Node(Presentation(get_transport(0xB)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.b"))
+    p_c = Node(Presentation(get_transport(0xC)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.c"))
+    p_trk = Node(Presentation(get_transport(None)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.trk"))
 
     try:
         last_update_args: typing.List[typing.Tuple[int, typing.Optional[Entry], typing.Optional[Entry]]] = []
@@ -60,7 +63,8 @@ async def _unittest_slow_node_tracker(
             assert not trk.registry
 
             # Bring the first node online and make sure it is detected and reported.
-            hb_a = asyncio.create_task(_publish_heartbeat(p_a, 0xDE))
+            p_a.heartbeat_publisher.vendor_specific_status_code = 0xDE
+            p_a.start()
             await asyncio.sleep(9)
             assert len(last_update_args) == 1
             assert last_update_args[0][0] == 0xA
@@ -78,7 +82,8 @@ async def _unittest_slow_node_tracker(
             trk.remove_update_handler(faulty_handler)
 
         # Bring the second node online and make sure it is detected and reported.
-        hb_b = asyncio.create_task(_publish_heartbeat(p_b, 0xBE))
+        p_b.heartbeat_publisher.vendor_specific_status_code = 0xBE
+        p_b.start()
         await asyncio.sleep(9)
         assert len(last_update_args) == 1
         assert last_update_args[0][0] == 0xB
@@ -95,9 +100,6 @@ async def _unittest_slow_node_tracker(
         assert trk.registry[0xB].heartbeat.vendor_specific_status_code == 0xBE
         assert trk.registry[0xB].info is None
 
-        # Enable get info servers. They will not be queried yet because the tracker node is anonymous.
-        _serve_get_info(p_a, "node-A")
-        _serve_get_info(p_b, "node-B")
         await asyncio.sleep(9)
         assert not last_update_args
         assert list(trk.registry.keys()) == [0xA, 0xB]
@@ -130,7 +132,7 @@ async def _unittest_slow_node_tracker(
                     assert new.heartbeat.vendor_specific_status_code == 0xDE
                     assert old.info is None
                     assert new.info is not None
-                    assert new.info.name.tobytes().decode() == "node-A"
+                    assert new.info.name.tobytes().decode() == "org.uavcan.pyuavcan.test.node_tracker.a"
                 elif num_events_a == 2:  # Restart detected
                     assert old is not None
                     assert new is not None
@@ -145,7 +147,7 @@ async def _unittest_slow_node_tracker(
                     assert new.heartbeat.vendor_specific_status_code == 0xFE
                     assert old.info is None
                     assert new.info is not None
-                    assert new.info.name.tobytes().decode() == "node-A"
+                    assert new.info.name.tobytes().decode() == "org.uavcan.pyuavcan.test.node_tracker.a"
                 elif num_events_a == 4:  # Offline
                     assert old is not None
                     assert new is None
@@ -167,7 +169,7 @@ async def _unittest_slow_node_tracker(
                     assert new.heartbeat.vendor_specific_status_code == 0xBE
                     assert old.info is None
                     assert new.info is not None
-                    assert new.info.name.tobytes().decode() == "node-B"
+                    assert new.info.name.tobytes().decode() == "org.uavcan.pyuavcan.test.node_tracker.b"
                 elif num_events_b == 2:
                     assert old is not None
                     assert new is None
@@ -195,7 +197,7 @@ async def _unittest_slow_node_tracker(
 
         trk.close()
         trk.close()  # Idempotency
-        p_trk = Presentation(get_transport(0xDD))
+        p_trk = Node(Presentation(get_transport(0xDD)), p_trk.info)
         trk = NodeTracker(p_trk)
         trk.add_update_handler(validating_handler)
         trk.start()
@@ -219,7 +221,7 @@ async def _unittest_slow_node_tracker(
         assert trk.registry[0xB].info.name.tobytes().decode() == "node-B"
 
         # Node B goes offline.
-        hb_b.cancel()
+        p_b.close()
         await asyncio.sleep(9)
         assert num_events_a == 2
         assert num_events_b == 3
@@ -231,7 +233,9 @@ async def _unittest_slow_node_tracker(
         assert trk.registry[0xA].info.name.tobytes().decode() == "node-A"
 
         # Node C appears online. It does not respond to GetInfo.
-        hb_c = asyncio.create_task(_publish_heartbeat(p_c, 0xF0))
+        p_c.heartbeat_publisher.vendor_specific_status_code = 0xF0
+        p_c.start()
+        p_c._srv_info.close()  # pylint: disable=protected-access
         await asyncio.sleep(9)
         assert num_events_a == 2
         assert num_events_b == 3
@@ -246,9 +250,10 @@ async def _unittest_slow_node_tracker(
         assert trk.registry[0xC].info is None
 
         # Node A is restarted. Node C goes offline.
-        hb_c.cancel()
-        hb_a.cancel()
-        hb_a = asyncio.create_task(_publish_heartbeat(p_a, 0xFE))
+        p_c.close()
+        p_a = Node(Presentation(get_transport(0xA)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.a"))
+        p_a.heartbeat_publisher.vendor_specific_status_code = 0xFE
+        p_a.start()
         await asyncio.sleep(9)
         assert num_events_a == 4  # Two extra events: node restart detection, then get info reception.
         assert num_events_b == 3
@@ -260,7 +265,7 @@ async def _unittest_slow_node_tracker(
         assert trk.registry[0xA].info.name.tobytes().decode() == "node-A"
 
         # Node A goes offline. No online nodes are left standing.
-        hb_a.cancel()
+        p_a.close()
         await asyncio.sleep(9)
         assert num_events_a == 5
         assert num_events_b == 3
@@ -270,36 +275,7 @@ async def _unittest_slow_node_tracker(
         # Finalization.
         trk.close()
         trk.close()  # Idempotency
-        for c in [hb_a, hb_b, hb_c]:
-            c.cancel()
     finally:
         for p in [p_a, p_b, p_c, p_trk]:
             p.close()
         await asyncio.sleep(1)  # Let all pending tasks finalize properly to avoid stack traces in the output.
-
-
-async def _publish_heartbeat(pres: pyuavcan.presentation.Presentation, vssc: int) -> None:
-    from pyuavcan.application.node_tracker import Heartbeat
-
-    pub = pres.make_publisher_with_fixed_subject_id(Heartbeat)
-    uptime = 0
-    while True:
-        msg = Heartbeat(uptime=uptime, vendor_specific_status_code=int(vssc))
-        uptime += 1
-        await pub.publish(msg)
-        await asyncio.sleep(1)
-
-
-def _serve_get_info(pres: pyuavcan.presentation.Presentation, name: str) -> None:
-    from pyuavcan.application.node_tracker import GetInfo
-
-    srv = pres.get_server_with_fixed_service_id(GetInfo)
-
-    async def handler(req: GetInfo.Request, meta: pyuavcan.transport.TransferFrom) -> GetInfo.Response:
-        resp = GetInfo.Response(
-            name=name,
-        )
-        _logger.info("GetInfo request %s metadata %s response %s", req, meta, resp)
-        return resp
-
-    srv.serve_in_background(handler)  # type: ignore

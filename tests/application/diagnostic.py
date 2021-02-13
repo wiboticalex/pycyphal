@@ -10,10 +10,11 @@ import pytest
 import pyuavcan
 from pyuavcan.transport.loopback import LoopbackTransport
 from pyuavcan.presentation import Presentation
+from pyuavcan.application import Node, NodeInfo
 
 
 @pytest.mark.asyncio  # type: ignore
-async def _unittest_slow_diagnostic(
+async def _unittest_slow_diagnostic_subscriber(
     compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any
 ) -> None:
     from pyuavcan.application import diagnostic
@@ -22,9 +23,9 @@ async def _unittest_slow_diagnostic(
     assert compiled
     asyncio.get_running_loop().slow_callback_duration = 1.0
 
-    pres = Presentation(LoopbackTransport(2222))
-    pub = pres.make_publisher_with_fixed_subject_id(diagnostic.Record)
-    diag = diagnostic.DiagnosticSubscriber(pres)
+    node = Node(Presentation(LoopbackTransport(2222)), NodeInfo())
+    pub = node.make_publisher(diagnostic.Record)
+    diag = diagnostic.DiagnosticSubscriber(node)
 
     diag.start()
 
@@ -49,5 +50,5 @@ async def _unittest_slow_diagnostic(
 
     diag.close()
     pub.close()
-    pres.close()
+    node.close()
     await asyncio.sleep(1.0)  # Let the background tasks terminate.

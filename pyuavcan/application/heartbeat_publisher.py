@@ -7,6 +7,7 @@ Publishes ``uavcan.node.Heartbeat`` periodically and provides a couple of basic 
 see :class:`HeartbeatPublisher`.
 """
 
+from __future__ import annotations
 import enum
 import time
 import typing
@@ -15,6 +16,7 @@ import asyncio
 import uavcan.node
 from uavcan.node import Heartbeat_1_0 as Heartbeat
 import pyuavcan
+from ._function import Function
 
 
 class Health(enum.IntEnum):
@@ -49,7 +51,7 @@ VENDOR_SPECIFIC_STATUS_CODE_MASK = (
 _logger = logging.getLogger(__name__)
 
 
-class HeartbeatPublisher:
+class HeartbeatPublisher(Function):
     """
     This class manages periodic publication of the node heartbeat message.
     Also it subscribes to heartbeat messages from other nodes and logs cautionary messages
@@ -63,11 +65,11 @@ class HeartbeatPublisher:
     - Mode is OPERATIONAL.
     - Vendor-specific status code is zero.
     - Period is MAX_PUBLICATION_PERIOD (see the DSDL definition).
-    - Priority is default as defined by the presentation layer (i.e., NOMINAL).
+    - Priority is default (i.e., NOMINAL).
     """
 
-    def __init__(self, presentation: pyuavcan.presentation.Presentation):
-        self._presentation = presentation
+    def __init__(self, node: pyuavcan.application.Node):
+        self._node = node
         self._instantiated_at = time.monotonic()
         self._health = Health.NOMINAL
         self._mode = Mode.OPERATIONAL
@@ -76,16 +78,28 @@ class HeartbeatPublisher:
         self._maybe_task: typing.Optional[asyncio.Task[None]] = None
         self._priority = pyuavcan.presentation.DEFAULT_PRIORITY
         self._period = float(Heartbeat.MAX_PUBLICATION_PERIOD)
-        self._subscriber = self._presentation.make_subscriber_with_fixed_subject_id(Heartbeat)
+        self._subscriber = self._node.make_subscriber(Heartbeat)
+
+    @property
+    def node(self) -> pyuavcan.application.Node:
+        return self._node
 
     def start(self) -> None:
         """
-        Starts the background publishing task on the presentation's event loop.
-        It will be stopped automatically when closed. Does nothing if already started.
+        Starts the background publishing task on the node's event loop.
         """
         if not self._maybe_task:
             self._subscriber.receive_in_background(self._handle_received_heartbeat)
-            self._maybe_task = self._presentation.loop.create_task(self._task_function())
+            self._maybe_task = self.node.loop.create_task(self._task_function())
+
+    def close(self) -> None:
+        """
+        Closes the publisher, the subscriber, and stops the internal task.
+        """
+        if self._maybe_task:
+            self._maybe_task.cancel()  # Cancel first to avoid exceptions from being logged from the task.
+            self._maybe_task = None
+            self._subscriber.close()
 
     @property
     def uptime(self) -> float:
@@ -158,7 +172,7 @@ class HeartbeatPublisher:
         Adds a new handler to be invoked immediately before a heartbeat message is published.
         The number of such handlers is unlimited.
         The handler invocation order follows the order of their registration.
-        Handlers are invoked from a task running on the presentation's event loop.
+        Handlers are invoked from a task running on the node's event loop.
         Handlers are not invoked until the instance is started.
 
         The handler can be used to synchronize the heartbeat message data (health, mode, vendor-specific status code)
@@ -179,16 +193,6 @@ class HeartbeatPublisher:
             vendor_specific_status_code=self.vendor_specific_status_code,
         )
 
-    def close(self) -> None:
-        """
-        Closes the publisher, the subscriber, and stops the internal task.
-        Subsequent invocations have no effect.
-        """
-        if self._maybe_task:
-            self._maybe_task.cancel()  # Cancel first to avoid exceptions from being logged from the task.
-            self._maybe_task = None
-            self._subscriber.close()
-
     async def _task_function(self) -> None:
         next_heartbeat_at = time.monotonic()
         pub: typing.Optional[pyuavcan.presentation.Publisher[Heartbeat]] = None
@@ -196,9 +200,9 @@ class HeartbeatPublisher:
             while self._maybe_task:
                 try:
                     pyuavcan.util.broadcast(self._pre_heartbeat_handlers)()
-                    if self._presentation.transport.local_node_id is not None:
+                    if self.node.id is not None:
                         if pub is None:
-                            pub = self._presentation.make_publisher_with_fixed_subject_id(Heartbeat)
+                            pub = self.node.make_publisher(Heartbeat)
                         assert pub is not None
                         pub.priority = self._priority
                         if not await pub.publish(self.make_message()):
@@ -220,7 +224,7 @@ class HeartbeatPublisher:
                 pub.close()
 
     async def _handle_received_heartbeat(self, msg: Heartbeat, metadata: pyuavcan.transport.TransferFrom) -> None:
-        local_node_id = self._presentation.transport.local_node_id
+        local_node_id = self.node.id
         remote_node_id = metadata.source_node_id
         if local_node_id is not None and remote_node_id is not None and local_node_id == remote_node_id:
             _logger.warning(

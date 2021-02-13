@@ -3,14 +3,17 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Union, Callable, Tuple, Type, TypeVar, Dict, Optional, Iterator
+from typing import Union, Callable, Tuple, Type, TypeVar, Dict, Optional, Iterator, List
+from collections.abc import Mapping
 from pathlib import Path
+import asyncio
 import logging
 import uavcan.node
 import pyuavcan
 from pyuavcan.presentation import Presentation, ServiceRequestMetadata, Publisher, Subscriber, Server, Client
 from . import heartbeat_publisher
 from . import register
+from ._function import Function
 
 
 NodeInfo = uavcan.node.GetInfo_1_0.Response
@@ -71,6 +74,7 @@ class Node:
         self._presentation = presentation
         self._info = info
         self._started = False
+        self._functions: List[Function] = []
 
         from .register.backend.sqlite import SQLiteBackend
         from .register.backend.dynamic import DynamicBackend
@@ -78,17 +82,32 @@ class Node:
         self._reg_db = SQLiteBackend(register_file or "")
         self._reg_dynamic = DynamicBackend()
         self._registry = register.Registry([self._reg_db, self._reg_dynamic])
-        self._reg_server = register.RegisterServer(self._presentation, self._registry)
         for name, value in register.parse_environment_variables(environment_variables):
             self.create_register(name, value, overwrite=True)
 
-        self._heartbeat_publisher = heartbeat_publisher.HeartbeatPublisher(self._presentation)
         self._srv_info = self.get_server(uavcan.node.GetInfo_1_0)
+        self._init_functions()
+
+    def _init_functions(self) -> None:
+        from ._register_server import RegisterServer
+
+        self._attach_function(heartbeat_publisher.HeartbeatPublisher(self))
+        self._attach_function(RegisterServer(self))
 
     @property
     def presentation(self) -> Presentation:
         """Provides access to the underlying instance of :class:`Presentation`."""
         return self._presentation
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        """Shortcut for ``self.presentation.loop``"""
+        return self.presentation.loop
+
+    @property
+    def id(self) -> Optional[int]:
+        """Shortcut for ``self.presentation.transport.local_node_id``"""
+        return self.presentation.transport.local_node_id
 
     @property
     def registry(self) -> register.Registry:
@@ -255,7 +274,10 @@ class Node:
     @property
     def heartbeat_publisher(self) -> heartbeat_publisher.HeartbeatPublisher:
         """Provides access to the heartbeat publisher instance of this node."""
-        return self._heartbeat_publisher
+        for fun in self._functions:
+            if isinstance(fun, heartbeat_publisher.HeartbeatPublisher):
+                return fun
+        assert False
 
     def start(self) -> None:
         """
@@ -263,10 +285,14 @@ class Node:
         Those will be automatically terminated when the node is closed.
         Does nothing if already started.
         """
+
+        async def _handle_get_info(_req: uavcan.node.GetInfo_1_0.Request, _meta: ServiceRequestMetadata) -> NodeInfo:
+            return self._info
+
         if not self._started:
-            self._srv_info.serve_in_background(self._handle_get_info_request)
-            self._heartbeat_publisher.start()
-            self._reg_server.start()
+            for fun in self._functions:
+                fun.start()
+            self._srv_info.serve_in_background(_handle_get_info)
             self._started = True
 
     def close(self) -> None:
@@ -276,18 +302,29 @@ class Node:
         The user does not have to close every port manually as it will be done automatically.
         """
         try:
-            self._heartbeat_publisher.close()
+            for fun in self._functions:
+                try:
+                    fun.close()
+                except Exception as ex:  # pragma: no cover
+                    _logger.exception("%r: Failed to close %r: %s", self, fun, ex)
             self._srv_info.close()
-            self._reg_server.close()
             self._registry.close()
         finally:
             self._presentation.close()
 
-    async def _handle_get_info_request(
-        self, _: uavcan.node.GetInfo_1_0.Request, metadata: ServiceRequestMetadata
-    ) -> NodeInfo:
-        _logger.debug("%r: Got a node info request %s", self, metadata)
-        return self._info
+    def _attach_function(self, fun: Function) -> None:
+        """
+        Attached functions are automatically :meth:`Function.start`-ed when this node is :meth:`start`-ed.
+        If the node is already started when a new function is attached, the function is started immediately.
+        Likewise, when the node is closed, all functions are closed.
+
+        :raises: :class:`ValueError` if :attr:`Function.node` of the added function is not this node.
+        """
+        if self is not fun.node:
+            raise ValueError("This function belongs to a different node")
+        if self._started:
+            fun.start()
+        self._functions.append(fun)
 
     def __repr__(self) -> str:
         return pyuavcan.util.repr_attributes(self, self._info, self._presentation, self.registry)
@@ -307,7 +344,7 @@ class Node:
         try:
             for name, value in register.parse_environment_variables(environment_variables):
                 db.set(name, value)
-            transport = _construct_transport_from_registers(registry, reconfigurable=reconfigurable_transport)
+            transport = construct_transport_from_registers(registry, reconfigurable=reconfigurable_transport)
             return Node(
                 Presentation(transport),
                 info,
@@ -318,8 +355,8 @@ class Node:
             registry.close()
 
 
-def _construct_transport_from_registers(
-    registry: register.Registry,
+def construct_transport_from_registers(
+    registers: Mapping[str, register.ValueProxy],
     *,
     reconfigurable: bool,
 ) -> pyuavcan.transport.Transport:
@@ -328,16 +365,16 @@ def _construct_transport_from_registers(
 
     def get(name: str, ty: Type[Ty]) -> Optional[Ty]:
         try:
-            return ty(registry[name])
-        except register.MissingRegisterError:
+            return ty(registers[name])
+        except KeyError:
             return None
 
     node_id = get("uavcan.node.id", int)
 
     def udp() -> Iterator[pyuavcan.transport.Transport]:
         try:
-            ip_list = str(registry["uavcan.udp.ip"]).split()
-        except register.MissingRegisterError:
+            ip_list = str(registers["uavcan.udp.ip"]).split()
+        except KeyError:
             return
 
         from pyuavcan.transport.udp import UDPTransport
@@ -349,8 +386,8 @@ def _construct_transport_from_registers(
 
     def serial() -> Iterator[pyuavcan.transport.Transport]:
         try:
-            port_list = str(registry["uavcan.serial.port"]).split()
-        except register.MissingRegisterError:
+            port_list = str(registers["uavcan.serial.port"]).split()
+        except KeyError:
             return
 
         from pyuavcan.transport.serial import SerialTransport
@@ -362,8 +399,8 @@ def _construct_transport_from_registers(
 
     def can() -> Iterator[pyuavcan.transport.Transport]:
         try:
-            iface_list = str(registry["uavcan.can.iface"]).split()
-        except register.MissingRegisterError:
+            iface_list = str(registers["uavcan.can.iface"]).split()
+        except KeyError:
             return
 
         from pyuavcan.transport.can import CANTransport
@@ -373,8 +410,8 @@ def _construct_transport_from_registers(
         mtu = get(reg_mtu, int)
         bitrate: Union[int, Tuple[int, int]]
         try:
-            bitrate_list = registry[reg_bitrate].ints
-        except register.MissingRegisterError:
+            bitrate_list = registers[reg_bitrate].ints
+        except KeyError:
             bitrate = (1_000_000, 4_000_000) if mtu is None or mtu > 8 else 1_000_000
         else:
             bitrate = (bitrate_list[0], bitrate_list[1]) if len(bitrate_list) > 1 else bitrate_list[0]
@@ -393,7 +430,7 @@ def _construct_transport_from_registers(
             yield CANTransport(media, node_id)
 
     def loopback() -> Iterator[pyuavcan.transport.Transport]:
-        if registry.get("uavcan.loopback"):
+        if registers.get("uavcan.loopback"):
             from pyuavcan.transport.loopback import LoopbackTransport
 
             yield LoopbackTransport(node_id)
@@ -401,9 +438,9 @@ def _construct_transport_from_registers(
     transports = *udp(), *serial(), *can(), *loopback()
     if not reconfigurable:
         if not transports:
-            raise register.MissingRegisterError(
+            raise KeyError(
                 f"The available registers do not encode a valid transport configuration. "
-                f"For reference, the defined register names are: {list(registry)}"
+                f"For reference, the defined register names are: {list(registers)}"
             )
         if len(transports) == 1:
             return transports[0]

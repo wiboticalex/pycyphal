@@ -5,6 +5,7 @@
 from __future__ import annotations
 from fnmatch import fnmatchcase
 from typing import List, TypeVar, Optional, Iterator, Iterable
+from collections.abc import Mapping
 import logging
 import pyuavcan
 from . import backend
@@ -42,7 +43,7 @@ class ValueProxyWithFlags(ValueProxy):
         return pyuavcan.util.repr_attributes(self, repr(self.value), mutable=self.mutable, persistent=self.persistent)
 
 
-class Registry:
+class Registry(Mapping[str, ValueProxy]):
     """
     The registry (register repository) is the main access point for the application to its registers.
     It is a facade that provides user-friendly API on top of multiple underlying register backends

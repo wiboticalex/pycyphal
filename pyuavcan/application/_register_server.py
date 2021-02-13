@@ -5,14 +5,16 @@
 from __future__ import annotations
 import logging
 import pyuavcan
-from pyuavcan.presentation import Presentation, ServiceRequestMetadata
+from pyuavcan.presentation import ServiceRequestMetadata
 from uavcan.register import Access_1_0 as Access
 from uavcan.register import List_1_0 as List
 from uavcan.register import Name_1_0 as Name
-from . import Registry, ValueConversionError, MissingRegisterError
+from .register import ValueConversionError, MissingRegisterError
+from ._function import Function
 
 
-class RegisterServer:
+class RegisterServer(Function):
+    # noinspection PyUnresolvedReferences,PyTypeChecker
     """
     Implementation of the standard network service ``uavcan.register``; specifically, List and Access.
 
@@ -21,48 +23,38 @@ class RegisterServer:
     This means that, for example, one can successfully modify a register of type
     ``bool[x]`` by sending a set request of type ``real64[x]``, or ``string`` with ``unstructured``, etc.
 
-    Here is a demo. First, set up the test environment:
+    Here is a demo. Set up a node -- it will instantiate a register server automatically:
 
+    >>> import pyuavcan
     >>> from pyuavcan.transport.loopback import LoopbackTransport
-    >>> from pyuavcan.presentation import Presentation
-    >>> pres = Presentation(LoopbackTransport(1))
-
-    Populate a registry (register repository):
-
     >>> from pyuavcan.application.register import Registry, Value, ValueProxy, Integer64, Real16, Unstructured
-    >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
-    >>> from tempfile import mktemp
-    >>> b0 = SQLiteBackend(mktemp(".db"))
-    >>> b0.set("foo", Value(integer64=Integer64([1, 20, -100])))
-    >>> registry = Registry([b0])
-    >>> registry["foo"].ints                    # Yup, the registry is set up with our dummy register.
+    >>> node = pyuavcan.application.Node(pyuavcan.presentation.Presentation(LoopbackTransport(1)),
+    ...                                  pyuavcan.application.NodeInfo())
+    >>> node.create_register("foo", Value(integer64=Integer64([1, 20, -100])))
+    >>> node.registry["foo"].ints               # Yup, the registry is set up with our dummy register.
     [1, 20, -100]
+    >>> node.start()
 
-    Instantiate and launch the server:
-
-    >>> srv = RegisterServer(pres, registry)
-    >>> srv.start()
-
-    It is now running using background async tasks. List registers:
+    List registers:
 
     >>> import uavcan.register
     >>> from asyncio import get_event_loop
-    >>> cln_list = pres.make_client_with_fixed_service_id(uavcan.register.List_1_0, server_node_id=1)
+    >>> cln_list = node.make_client(uavcan.register.List_1_0, server_node_id=1)
     >>> response, _ = get_event_loop().run_until_complete(cln_list.call(uavcan.register.List_1_0.Request(index=0)))
     >>> response.name.name.tobytes().decode()   # The dummy register we created above.
     'foo'
-    >>> response, _ = get_event_loop().run_until_complete(cln_list.call(uavcan.register.List_1_0.Request(index=1)))
+    >>> response, _ = get_event_loop().run_until_complete(cln_list.call(uavcan.register.List_1_0.Request(index=99)))
     >>> response.name.name.tobytes().decode()   # Out of range -- empty string returned to indicate that.
     ''
 
     Get the dummy register created above:
 
-    >>> cln_access = pres.make_client_with_fixed_service_id(uavcan.register.Access_1_0, server_node_id=1)
+    >>> cln_access = node.make_client(uavcan.register.Access_1_0, server_node_id=1)
     >>> request = uavcan.register.Access_1_0.Request()
     >>> request.name.name = "foo"
     >>> response, _ = get_event_loop().run_until_complete(cln_access.call(request))
     >>> response.mutable, response.persistent
-    (True, True)
+    (True, False)
     >>> ValueProxy(response.value).ints
     [1, 20, -100]
 
@@ -73,7 +65,7 @@ class RegisterServer:
     >>> response, _ = get_event_loop().run_until_complete(cln_access.call(request))
     >>> ValueProxy(response.value).ints     # Automatically converted.
     [3, 3, -500]
-    >>> registry["foo"].ints                # Yup, the register is, indeed, updated by the server.
+    >>> node.registry["foo"].ints           # Yup, the register is, indeed, updated by the server.
     [3, 3, -500]
 
     If the type cannot be converted or the register is immutable, the write is ignored,
@@ -91,23 +83,20 @@ class RegisterServer:
     >>> response.value.empty is not None
     True
 
-    Close the instance afterwards:
-
-    >>> srv.close()
-    >>> registry.close()
-    >>> pres.close()
+    >>> node.close()
     """
 
-    def __init__(self, presentation: Presentation, registry: Registry) -> None:
+    def __init__(self, node: pyuavcan.application.Node) -> None:
         """
-        :param presentation: RPC-service instances will be constructed from this presentation instance.
+        :param node: The node instance to serve the register API for.
+        """
+        self._node = node
+        self._srv_list = self.node.get_server(List)
+        self._srv_access = self.node.get_server(Access)
 
-        :param registry: The ownership is not transferred, meaning that the user should close the
-            registry manually when done.
-        """
-        self._registry = registry
-        self._srv_list = presentation.get_server_with_fixed_service_id(List)
-        self._srv_access = presentation.get_server_with_fixed_service_id(Access)
+    @property
+    def node(self) -> pyuavcan.application.Node:
+        return self._node
 
     def start(self) -> None:
         self._srv_list.serve_in_background(self._handle_list)
@@ -118,7 +107,7 @@ class RegisterServer:
         self._srv_access.close()
 
     async def _handle_list(self, request: List.Request, metadata: ServiceRequestMetadata) -> List.Response:
-        name = self._registry.get_name_at_index(request.index)
+        name = self.node.registry.get_name_at_index(request.index)
         _logger.debug("%r: List request index %r name %r %r", self, request.index, name, metadata)
         if name is not None:
             return List.Response(Name(name))
@@ -126,16 +115,16 @@ class RegisterServer:
 
     async def _handle_access(self, request: Access.Request, metadata: ServiceRequestMetadata) -> Access.Response:
         name = request.name.name.tobytes().decode("utf8", "ignore")
-        v = self._registry.get(name)
+        v = self.node.registry.get(name)
         if v is not None and v.mutable and not request.value.empty:
             try:
                 v.assign(request.value)
-                self._registry.set(name, v)
+                self.node.registry.set(name, v)
             except ValueConversionError as ex:
                 _logger.debug("%r: Conversion from %r to %r is not possible: %s", self, request.value, v.value, ex)
             except MissingRegisterError as ex:  # pragma: no cover
                 _logger.warning("%r: The register has gone away: %s", self, ex)
-            v = self._registry.get(name)  # Read back one more time just in case to confirm write.
+            v = self.node.registry.get(name)  # Read back one more time just in case to confirm write.
         if v is not None:
             response = Access.Response(
                 mutable=v.mutable,
@@ -146,9 +135,6 @@ class RegisterServer:
             response = Access.Response()  # No such register
         _logger.debug("%r: Access %r: %r %r", self, metadata, request, response)
         return response
-
-    def __repr__(self) -> str:
-        return pyuavcan.util.repr_attributes(self, self._registry)
 
 
 _logger = logging.getLogger(__name__)

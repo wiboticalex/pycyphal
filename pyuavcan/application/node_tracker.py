@@ -7,12 +7,14 @@ Keeps track of online nodes by subscribing to ``uavcan.node.Heartbeat`` and requ
 when necessary; see :class:`NodeTracker`.
 """
 
+from __future__ import annotations
 import typing
 import asyncio
 import logging
 from uavcan.node import Heartbeat_1_0 as Heartbeat
 from uavcan.node import GetInfo_1_0 as GetInfo
 import pyuavcan
+from ._function import Function
 
 
 Entry = typing.NamedTuple(
@@ -38,7 +40,7 @@ Arguments: node-ID, old entry, new entry. See :meth:`NodeTracker.add_update_hand
 _logger = logging.getLogger(__name__)
 
 
-class NodeTracker:
+class NodeTracker(Function):
     """
     This class is designed for tracking the list of online nodes in real time.
     It subscribes to ``uavcan.node.Heartbeat`` to keep a list of online nodes.
@@ -78,9 +80,9 @@ class NodeTracker:
     The counter will resume from scratch if the node is restarted or a new node under that node-ID is detected.
     """
 
-    def __init__(self, presentation: pyuavcan.presentation.Presentation):
-        self._presentation = presentation
-        self._sub_heartbeat = self._presentation.make_subscriber_with_fixed_subject_id(Heartbeat)
+    def __init__(self, node: pyuavcan.application.Node):
+        self._node = node
+        self._sub_heartbeat = self.node.make_subscriber(Heartbeat)
 
         self._registry: typing.Dict[int, Entry] = {}
         self._offline_timers: typing.Dict[int, asyncio.TimerHandle] = {}
@@ -90,6 +92,10 @@ class NodeTracker:
 
         self._get_info_timeout = self.DEFAULT_GET_INFO_TIMEOUT
         self._get_info_attempts = self.DEFAULT_GET_INFO_ATTEMPTS
+
+    @property
+    def node(self) -> pyuavcan.application.Node:
+        return self._node
 
     @property
     def get_info_timeout(self) -> float:
@@ -209,9 +215,7 @@ class NodeTracker:
             self._offline_timers[node_id].cancel()
         except LookupError:
             pass
-        self._offline_timers[node_id] = self._presentation.loop.call_later(
-            Heartbeat.OFFLINE_TIMEOUT, self._on_offline, node_id
-        )
+        self._offline_timers[node_id] = self.node.loop.call_later(Heartbeat.OFFLINE_TIMEOUT, self._on_offline, node_id)
 
         # Do the update unless this is just a regular heartbeat (no restart, known node).
         if update:
@@ -241,7 +245,7 @@ class NodeTracker:
 
     def _request_info(self, node_id: int) -> None:
         async def attempt() -> bool:
-            client = self._presentation.make_client_with_fixed_service_id(GetInfo, node_id)
+            client = self.node.make_client(GetInfo, node_id)
             try:
                 client.priority = self.GET_INFO_PRIORITY
                 client.response_timeout = self._get_info_timeout
@@ -290,7 +294,7 @@ class NodeTracker:
             del self._info_tasks[node_id]
 
         self._cancel_task(node_id)
-        self._info_tasks[node_id] = self._presentation.loop.create_task(worker())
+        self._info_tasks[node_id] = self.node.loop.create_task(worker())
 
     def _notify(self, node_id: int, old_entry: typing.Optional[Entry], new_entry: typing.Optional[Entry]) -> None:
         assert isinstance(old_entry, Entry) or old_entry is None

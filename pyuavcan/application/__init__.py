@@ -274,14 +274,19 @@ Application-layer function implementations
 As mentioned in the description of the Node class, it provides certain bare-minumum standard application-layer
 functionality like publishing heartbeats, responding to GetInfo, serving the register API, etc.
 More complex capabilities are to be set up by the user as needed.
-Some of them are:
 
-.. autosummary::
-   pyuavcan.application.diagnostic.DiagnosticSubscriber
-   pyuavcan.application.diagnostic.DiagnosticPublisher
-   pyuavcan.application.node_tracker.NodeTracker
-   pyuavcan.application.plug_and_play.Allocatee
-   pyuavcan.application.plug_and_play.Allocator
+..  computron-injection::
+
+    import re, pyuavcan, pyuavcan.application
+    print(".. autosummary::")
+    print("   :nosignatures:")
+    print()
+    pyuavcan.util.import_submodules(pyuavcan.application)
+    for cls in pyuavcan.util.iter_descendants(pyuavcan.application.Function):
+        export_module_name = re.sub(r"\._[_a-zA-Z0-9]*", "", cls.__module__)
+        print(f"   {export_module_name}.{cls.__name__}")
+    print()
 """
 
 from ._node import Node as Node, NodeInfo as NodeInfo
+from ._function import Function as Function

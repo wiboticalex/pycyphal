@@ -12,7 +12,7 @@ from pyuavcan.transport.can import CANTransport
 from pyuavcan.presentation import Presentation
 from tests.transport.can.media.mock import MockMedia
 
-_TABLE = pathlib.Path("allocation_table.sqlite.tmp")
+_TABLE = pathlib.Path("allocation_table.db")
 
 _logger = logging.getLogger(__name__)
 
