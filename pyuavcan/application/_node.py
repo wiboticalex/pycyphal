@@ -362,11 +362,33 @@ class Node:
         try:
             for name, value in register.parse_environment_variables(environment_variables):
                 db.set(name, value)
-            return Node(
+
+            node = Node(
                 Presentation(init_transport()),
                 info,
                 register_file,
                 environment_variables=environment_variables,
             )
+
+            try:
+                uavcan_severity = int(registry["uavcan.diagnostic.severity"])
+            except KeyError:
+                pass
+            else:
+                from .diagnostic import DiagnosticSubscriber, DiagnosticPublisher
+
+                uavcan_severity = max(uavcan_severity, 0)
+                diag_publisher = DiagnosticPublisher(
+                    node,
+                    level=DiagnosticSubscriber.SEVERITY_UAVCAN_TO_PYTHON.get(uavcan_severity, logging.CRITICAL),
+                )
+                try:
+                    diag_publisher.timestamping_enabled = bool(registry["uavcan.diagnostic.timestamp"])
+                except KeyError:
+                    pass
+                logging.root.addHandler(diag_publisher)
+                node.add_lifetime_hooks(None, lambda: logging.root.removeHandler(diag_publisher))
+
         finally:
             registry.close()
+        return node

@@ -23,19 +23,6 @@ DESTINATION_DIR = Path.cwd().resolve() / ".compiled"
 _CACHE_FILE_NAME = "pydsdl_cache.pickle.tmp"
 
 
-@pytest.fixture(scope="session")  # type: ignore
-def compiled() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
-    """
-    https://docs.pytest.org/en/latest/fixture.html#conftest-py-sharing-fixture-functions
-
-    The implicitness of test fixtures and lack of type information makes the IDE emit bogus usage warnings,
-    leads MyPy into emitting false positives, prevents developers from tracing the origins of used entities,
-    and generally goes against one of the Python's core principles about explicit vs. implicit.
-    I am not a big fan of this feature.
-    """
-    return compile()
-
-
 @functools.lru_cache()
 def compile() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
     """
@@ -91,3 +78,6 @@ def compile() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
     assert out and isinstance(out, list)
     assert all(map(lambda x: isinstance(x, pyuavcan.dsdl.GeneratedPackageInfo), out))
     return out
+
+
+compiled = pytest.fixture(scope="session")(compile)

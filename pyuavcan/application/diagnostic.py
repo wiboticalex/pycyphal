@@ -27,33 +27,13 @@ class DiagnosticSubscriber:
     """
     Subscribes to ``uavcan.diagnostic.Record`` and forwards every received message into Python's :mod:`logging`.
     The logger name is that of the current module.
-    The log level is mapped as follows:
+    The log level mapping is defined by :attr:`SEVERITY_UAVCAN_TO_PYTHON`.
 
-    +-------------------------------+-------------------+
-    | ``uavcan.diagnostic.Severity``| ``logging`` level |
-    +===============================+===================+
-    | TRACE                         | INFO              |
-    +-------------------------------+-------------------+
-    | DEBUG                         | INFO              |
-    +-------------------------------+-------------------+
-    | INFO                          | INFO              |
-    +-------------------------------+-------------------+
-    | NOTICE                        | INFO              |
-    +-------------------------------+-------------------+
-    | WARNING                       | WARNING           |
-    +-------------------------------+-------------------+
-    | ERROR                         | ERROR             |
-    +-------------------------------+-------------------+
-    | CRITICAL                      | CRITICAL          |
-    +-------------------------------+-------------------+
-    | ALERT                         | CRITICAL          |
-    +-------------------------------+-------------------+
-
-    Such logging behavior is especially convenient for various CLI tools and automation scripts where the user will not
+    This class is convenient for various CLI tools and automation scripts where the user will not
     need to implement additional logic to see log messages from the network.
     """
 
-    _LEVEL_MAP = {
+    SEVERITY_UAVCAN_TO_PYTHON = {
         Severity.TRACE: logging.INFO,
         Severity.DEBUG: logging.INFO,
         Severity.INFO: logging.INFO,
@@ -79,7 +59,7 @@ class DiagnosticSubscriber:
             + f"ts_sync={msg.timestamp.microsecond * 1e-6:0.6f} ts_local={meta.timestamp}:\n"
             + diag_text
         )
-        level = self._LEVEL_MAP.get(msg.severity.value, logging.CRITICAL)
+        level = self.SEVERITY_UAVCAN_TO_PYTHON.get(msg.severity.value, logging.CRITICAL)
         _logger.log(level, log_text)
 
 

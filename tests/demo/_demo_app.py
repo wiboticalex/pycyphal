@@ -88,9 +88,8 @@ async def _unittest_slow_demo_app(
         # At the first run, force the demo script to regenerate packages.
         # The following runs shall not force this behavior to save time and enhance branch coverage.
         print("FORCE DSDL RECOMPILATION")
-        dsdl_output_path = pathlib.Path(".compiled").resolve()
-        if dsdl_output_path.exists():
-            shutil.rmtree(dsdl_output_path)
+        for p in pathlib.Path(".compiled").resolve().glob("pyuavcan_*"):
+            shutil.rmtree(p)
 
     # The demo may need to generate packages as well, so we launch it first.
     env = run_config.env.copy()
