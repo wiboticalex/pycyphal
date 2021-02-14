@@ -15,14 +15,13 @@ from pyuavcan.transport.loopback import LoopbackTransport
 async def _unittest_slow_diagnostic_subscriber(
     compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo], caplog: typing.Any
 ) -> None:
-    from pyuavcan.presentation import Presentation
-    from pyuavcan.application import Node, NodeInfo, diagnostic
+    from pyuavcan.application import make_node, NodeInfo, diagnostic
     from uavcan.time import SynchronizedTimestamp_1_0
 
     assert compiled
     asyncio.get_running_loop().slow_callback_duration = 1.0
 
-    node = Node(Presentation(LoopbackTransport(2222)), NodeInfo())
+    node = make_node(NodeInfo(), transport=LoopbackTransport(2222))
     node.start()
     pub = node.make_publisher(diagnostic.Record)
     diagnostic.DiagnosticSubscriber(node)

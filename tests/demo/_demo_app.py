@@ -127,7 +127,7 @@ async def _unittest_slow_demo_app(
         )
         env = mirror(env)
         env["UAVCAN__NODE__ID__NATURAL16"] = "123"
-        node = pyuavcan.application.Node.from_registers(local_node_info, environment_variables=env)
+        node = pyuavcan.application.make_node(local_node_info, environment_variables=env)
         del node.registry["thermostat*"]
     except Exception:
         demo_proc.kill()

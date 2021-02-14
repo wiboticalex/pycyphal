@@ -2,6 +2,7 @@
 # This software is distributed under the terms of the MIT License.
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
+from __future__ import annotations
 from typing import Mapping, Iterator, Type, Optional, TypeVar, Union
 import pyuavcan
 from .register import ValueProxy, Value
@@ -10,7 +11,7 @@ from .register import ValueProxy, Value
 _RegisterType = TypeVar("_RegisterType", int, float, bool, str, bytes)
 
 
-def make_transport_from_registers(
+def make_transport(
     registers: Mapping[str, Union[ValueProxy, Value]],
     *,
     reconfigurable: bool = False,
@@ -136,11 +137,11 @@ def make_transport_from_registers(
     ...     "uavcan.udp.ip": Value(string=String("127.99.0.0")),
     ...     "uavcan.node.id": Value(natural16=Natural16([257])),
     ... }
-    >>> tr = make_transport_from_registers(reg)
+    >>> tr = make_transport(reg)
     >>> tr
     UDPTransport('127.99.1.1', local_node_id=257, ...)
     >>> tr.close()
-    >>> tr = make_transport_from_registers(reg, reconfigurable=True)    # Same but reconfigurable.
+    >>> tr = make_transport(reg, reconfigurable=True)    # Same but reconfigurable.
     >>> tr                                                              # Wrapped into RedundantTransport.
     RedundantTransport(UDPTransport('127.99.1.1', local_node_id=257, ...))
     >>> tr.close()
@@ -149,7 +150,7 @@ def make_transport_from_registers(
     ...     "uavcan.udp.ip":      Value(string=String("127.99.0.15 127.111.0.15")),     # Double UDP transport
     ...     "uavcan.serial.port": Value(string=String("socket://localhost:50905")),     # Single serial transport
     ... }
-    >>> tr = make_transport_from_registers(reg)     # The node-ID was not set, so the transport is anonymous.
+    >>> tr = make_transport(reg)     # The node-ID was not set, so the transport is anonymous.
     >>> tr                                          # doctest: +NORMALIZE_WHITESPACE
     RedundantTransport(UDPTransport('127.99.0.15',  local_node_id=None, ...),
                        UDPTransport('127.111.0.15', local_node_id=None, ...),
@@ -162,16 +163,16 @@ def make_transport_from_registers(
     ...     "uavcan.can.bitrate": Value(natural16=Natural16([1_000_000, 4_000_000])),
     ...     "uavcan.node.id":     Value(natural16=Natural16([123])),
     ... }
-    >>> tr = make_transport_from_registers(reg)
+    >>> tr = make_transport(reg)
     >>> tr                                          # doctest: +NORMALIZE_WHITESPACE
     RedundantTransport(CANTransport(PythonCANMedia('virtual:', mtu=64), local_node_id=123),
                        CANTransport(PythonCANMedia('virtual:', mtu=64), local_node_id=123))
     >>> tr.close()
 
-    >>> tr = make_transport_from_registers({})
+    >>> tr = make_transport({})
     >>> tr is None
     True
-    >>> tr = make_transport_from_registers({}, reconfigurable=True)
+    >>> tr = make_transport({}, reconfigurable=True)
     >>> tr                  # Redundant transport with no inferiors.
     RedundantTransport()
     """

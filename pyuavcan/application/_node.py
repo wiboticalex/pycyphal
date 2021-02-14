@@ -3,8 +3,8 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Union, Callable, Tuple, Type, TypeVar, Dict, Optional, List
-from pathlib import Path
+from typing import Union, Callable, Tuple, Type, TypeVar, Optional, List
+import abc
 import asyncio
 import logging
 import uavcan.node
@@ -20,12 +20,12 @@ MessageClass = TypeVar("MessageClass", bound=pyuavcan.dsdl.CompositeObject)
 ServiceClass = TypeVar("ServiceClass", bound=pyuavcan.dsdl.ServiceObject)
 
 
-_logger = logging.getLogger(__name__)
-
-
-class Node:
+class Node(abc.ABC):
     """
     This is the top-level abstraction representing a UAVCAN node on the bus.
+    This is an abstract class; instantiate it using the factory :func:`pyuavcan.application.make_node`
+    or (in special cases) create custom implementations.
+
     This class automatically instantiates the following application-layer function implementations:
 
     - :class:`heartbeat_publisher.HeartbeatPublisher`
@@ -34,65 +34,19 @@ class Node:
 
     If the provided transport is anonymous and it is unable to construct service ports in anonymous mode,
     then RPC-services (like GetInfo, register API, etc.) are not initialized.
-    Read the attribute documentation for further details.
 
     Start the instance when initialization is finished by invoking :meth:`start`.
     This will also automatically start all function implementation instances like the heartbeat publisher, etc.
     """
 
-    def __init__(
-        self,
-        presentation: Presentation,
-        info: NodeInfo,
-        register_file: Union[None, str, Path] = None,
-        *,
-        environment_variables: Optional[Dict[str, str]] = None,
-    ):
-        """
-        :param presentation:
-            The node takes ownership of the supplied presentation controller.
-            Ownership here means that the controller will be closed (along with all sessions and other resources)
-            when the node is closed.
-
-        :param info:
-            The info structure is sent as a response to requests of type ``uavcan.node.GetInfo``;
-            the corresponding server instance is established and run by the node class automatically.
-
-        :param register_file:
-            Path to the SQLite file containing the register database; or, in other words,
-            the configuration file of this application/node.
-            If not provided (default), the registers of this instance will be stored in-memory,
-            meaning that no persistent configuration will be kept anywhere.
-            If path is provided but the file does not exist, it will be created automatically.
-            See :attr:`registry`, :meth:`create_register`.
-
-        :param environment_variables:
-            The register values passed via environment variables will be automatically parsed and for each
-            register the method :meth:`create_register` will be invoked (with overwrite flag set).
-            See :func:`register.parse_environment_variables` for additional details.
-
-            If None (default), the variables are taken from :attr:`os.environ`.
-            To disable variable parsing, pass an empty dict here.
-        """
-        self._presentation = presentation
-        self._info = info
+    def __init__(self) -> None:
         self._started = False
         self._on_start: List[Callable[[], None]] = []
         self._on_close: List[Callable[[], None]] = []
 
-        from .register.backend.sqlite import SQLiteBackend
-        from .register.backend.dynamic import DynamicBackend
-
-        self._reg_db = SQLiteBackend(register_file or "")
-        self._reg_dynamic = DynamicBackend()
-        self._registry = register.Registry([self._reg_db, self._reg_dynamic])
-        for name, value in register.parse_environment_variables(environment_variables):
-            self.create_register(name, value, overwrite=True)
-
+        # Instantiate application-layer functions. Please keep the class docstring updated when changing this.
         self._heartbeat_publisher = heartbeat_publisher.HeartbeatPublisher(self)
-        self._init_functions()
 
-    def _init_functions(self) -> None:
         from ._register_server import RegisterServer
 
         async def handle_get_info(_req: uavcan.node.GetInfo_1_0.Request, _meta: ServiceRequestMetadata) -> NodeInfo:
@@ -107,24 +61,22 @@ class Node:
             self.add_lifetime_hooks(lambda: srv_info.serve_in_background(handle_get_info), srv_info.close)
 
     @property
+    @abc.abstractmethod
     def presentation(self) -> Presentation:
         """Provides access to the underlying instance of :class:`Presentation`."""
-        return self._presentation
+        raise NotImplementedError
 
     @property
-    def loop(self) -> asyncio.AbstractEventLoop:
-        """Shortcut for ``self.presentation.loop``"""
-        return self.presentation.loop
+    @abc.abstractmethod
+    def info(self) -> NodeInfo:
+        """Provides access to the local node info structure. See :class:`NodeInfo`."""
+        raise NotImplementedError
 
     @property
-    def id(self) -> Optional[int]:
-        """Shortcut for ``self.presentation.transport.local_node_id``"""
-        return self.presentation.transport.local_node_id
-
-    @property
+    @abc.abstractmethod
     def registry(self) -> register.Registry:
         """
-        Provides access to the local registry instance (see :class:`pyuavcan.application.register.Registry`).
+        Provides access to the local registry instance (see :class:`register.Registry`).
         The registry manages UAVCAN registers as defined by the standard network service ``uavcan.register``.
 
         The registers store the configuration parameters of the current application, both standard
@@ -136,8 +88,9 @@ class Node:
 
         See also :meth:`make_publisher`, :meth:`make_subscriber`, :meth:`make_client`, :meth:`get_server`.
         """
-        return self._registry
+        raise NotImplementedError
 
+    @abc.abstractmethod
     def create_register(
         self,
         name: str,
@@ -153,7 +106,7 @@ class Node:
         overwrite: bool = False,
     ) -> None:
         """
-        Create new registers (define register schema).
+        Create a new register (define register schema).
 
         :param name: The name of the register.
 
@@ -181,26 +134,22 @@ class Node:
             This behavior can be changed by setting this flag to True, which will cause the register to be
             unconditionally overwritten even if the type is different (no type conversion will take place).
         """
-        if not overwrite and self.registry.get(name) is not None:
-            _logger.debug("%r: Register %r already exists and overwrite not enabled", self, name)
-            return
+        raise NotImplementedError
 
-        def unwrap(x: Union[register.Value, register.ValueProxy]) -> register.Value:
-            if isinstance(x, register.ValueProxy):
-                return x.value
-            return x
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        """Shortcut for ``self.presentation.loop``"""
+        return self.presentation.loop
 
-        v = value_or_getter_or_getter_setter
-        _logger.debug("%r: Create register %r = %r", self, name, v)
-        if isinstance(v, (register.Value, register.ValueProxy)):
-            self._reg_db.set(name, unwrap(v))
-        elif callable(v):
-            self._reg_dynamic.register(name, lambda: unwrap(v()))  # type: ignore
-        elif isinstance(v, tuple) and len(v) == 2 and all(map(callable, v)):
-            g, s = v
-            self._reg_dynamic.register(name, lambda: unwrap(g()), s)
-        else:  # pragma: no cover
-            raise TypeError(f"Invalid register creation argument: {v}")
+    @property
+    def id(self) -> Optional[int]:
+        """Shortcut for ``self.presentation.transport.local_node_id``"""
+        return self.presentation.transport.local_node_id
+
+    @property
+    def heartbeat_publisher(self) -> heartbeat_publisher.HeartbeatPublisher:
+        """Provides access to the heartbeat publisher instance of this node."""
+        return self._heartbeat_publisher
 
     def make_publisher(self, dtype: Type[MessageClass], port_name: str = "") -> Publisher[MessageClass]:
         """
@@ -278,23 +227,12 @@ class Node:
         _logger.debug("%r: Port-ID %r %r resolved as %r", self, kind, name, port_id)
         return port_id
 
-    @property
-    def info(self) -> NodeInfo:
-        """Provides access to the local node info structure. See :class:`pyuavcan.application.NodeInfo`."""
-        return self._info
-
-    @property
-    def heartbeat_publisher(self) -> heartbeat_publisher.HeartbeatPublisher:
-        """Provides access to the heartbeat publisher instance of this node."""
-        return self._heartbeat_publisher
-
     def start(self) -> None:
         """
-        Starts this node and all application-layer function implementations that are initialized on it
-        (like the heartbeat publisher, diagnostics, and basically anything that takes a node reference in its
-        constructor).
-        Those will be automatically terminated when the node is closed.
-        Does nothing if already started.
+        Starts all application-layer function implementations that are initialized on it (like the heartbeat publisher,
+        diagnostics, and basically anything that takes a node reference in its constructor).
+        These will be automatically terminated when the node is closed.
+        This method is idempotent.
         """
         if not self._started:
             for fun in self._on_start:  # First failure aborts the start.
@@ -303,15 +241,11 @@ class Node:
 
     def close(self) -> None:
         """
-        Closes the underlying presentation instance, application-level functions, and all other entities.
-        Does nothing if already closed.
+        Closes the underlying resources and the application-level functions.
         The user does not have to close every port manually as it will be done automatically.
+        This method is idempotent.
         """
-        try:
-            pyuavcan.util.broadcast(self._on_close)()
-            self._registry.close()
-        finally:
-            self._presentation.close()
+        pyuavcan.util.broadcast(self._on_close)()
 
     def add_lifetime_hooks(self, start: Optional[Callable[[], None]], close: Optional[Callable[[], None]]) -> None:
         """
@@ -319,76 +253,16 @@ class Node:
         If the node is already started when this method is invoked, the start hook is called immediately.
         The close hook is invoked when this node is :meth:`close`-d.
         """
-        if start:
+        if start is not None:
             if self._started:
                 start()
             else:
                 self._on_start.append(start)
-        if close:
+        if close is not None:
             self._on_close.append(close)
 
     def __repr__(self) -> str:
-        return pyuavcan.util.repr_attributes(self, self._info, self._presentation, self.registry)
+        return pyuavcan.util.repr_attributes(self, self.info, self.presentation, self.registry)
 
-    @staticmethod
-    def from_registers(
-        info: NodeInfo,
-        register_file: Union[None, str, Path] = None,
-        environment_variables: Optional[Dict[str, str]] = None,
-        *,
-        transport: Optional[pyuavcan.transport.Transport] = None,
-        reconfigurable_transport: bool = False,
-    ) -> Node:
-        from pyuavcan.transport.redundant import RedundantTransport
-        from .register.backend.sqlite import SQLiteBackend
-        from ._transport_factory import make_transport_from_registers
 
-        def init_transport() -> pyuavcan.transport.Transport:
-            if transport is None:
-                out = make_transport_from_registers(registry, reconfigurable=reconfigurable_transport)
-                if out is not None:
-                    return out
-                raise register.MissingRegisterError(
-                    f"Available registers do not encode a valid transport configuration: {list(registry)}"
-                )
-            if not isinstance(transport, RedundantTransport) and reconfigurable_transport:
-                out = RedundantTransport()
-                out.attach_inferior(transport)
-                return out
-            return transport
-
-        db = SQLiteBackend(register_file or "")
-        registry = register.Registry([db])
-        try:
-            for name, value in register.parse_environment_variables(environment_variables):
-                db.set(name, value)
-
-            node = Node(
-                Presentation(init_transport()),
-                info,
-                register_file,
-                environment_variables=environment_variables,
-            )
-
-            try:
-                uavcan_severity = int(registry["uavcan.diagnostic.severity"])
-            except KeyError:
-                pass
-            else:
-                from .diagnostic import DiagnosticSubscriber, DiagnosticPublisher
-
-                uavcan_severity = max(uavcan_severity, 0)
-                diag_publisher = DiagnosticPublisher(
-                    node,
-                    level=DiagnosticSubscriber.SEVERITY_UAVCAN_TO_PYTHON.get(uavcan_severity, logging.CRITICAL),
-                )
-                try:
-                    diag_publisher.timestamping_enabled = bool(registry["uavcan.diagnostic.timestamp"])
-                except KeyError:
-                    pass
-                logging.root.addHandler(diag_publisher)
-                node.add_lifetime_hooks(None, lambda: logging.root.removeHandler(diag_publisher))
-
-        finally:
-            registry.close()
-        return node
+_logger = logging.getLogger(__name__)

@@ -82,9 +82,8 @@ class DiagnosticPublisher(logging.Handler):
 
     >>> from asyncio import get_event_loop
     >>> from pyuavcan.transport.loopback import LoopbackTransport
-    >>> from pyuavcan.presentation import Presentation
-    >>> from pyuavcan.application import Node, NodeInfo
-    >>> node = Node(Presentation(LoopbackTransport(1)), NodeInfo())
+    >>> from pyuavcan.application import make_node, NodeInfo
+    >>> node = make_node(NodeInfo(), transport=LoopbackTransport(1))
     >>> node.start()
 
     Instantiate publisher and install it with the logging system:

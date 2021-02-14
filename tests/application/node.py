@@ -13,7 +13,7 @@ from pyuavcan.presentation import Presentation
 
 @pytest.mark.asyncio  # type: ignore
 async def _unittest_slow_node(compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo]) -> None:
-    from pyuavcan.application import Node
+    from pyuavcan.application import make_node
     from uavcan.node import Version_1_0, Heartbeat_1_0, GetInfo_1_0, Mode_1_0, Health_1_0
 
     asyncio.get_running_loop().slow_callback_duration = 3.0
@@ -24,16 +24,15 @@ async def _unittest_slow_node(compiled: typing.List[pyuavcan.dsdl.GeneratedPacka
     remote_info_cln = remote_pres.make_client_with_fixed_service_id(GetInfo_1_0, 258)
 
     trans = RedundantTransport()
-    pres = Presentation(trans)
     try:
         info = GetInfo_1_0.Response(
             protocol_version=Version_1_0(*pyuavcan.UAVCAN_SPECIFICATION_VERSION),
             software_version=Version_1_0(*pyuavcan.__version_info__[:2]),
             name="org.uavcan.pyuavcan.test.node",
         )
-        node = Node(pres, info)
+        node = make_node(info, transport=trans)
         print("node:", node)
-        assert node.presentation is pres
+        assert node.presentation.transport is trans
         node.start()
         node.start()  # Idempotency
 
@@ -87,6 +86,6 @@ async def _unittest_slow_node(compiled: typing.List[pyuavcan.dsdl.GeneratedPacka
         node.close()
         node.close()  # Idempotency
     finally:
-        pres.close()
+        trans.close()
         remote_pres.close()
         await asyncio.sleep(1.0)  # Let the background tasks terminate.

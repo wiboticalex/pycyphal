@@ -50,7 +50,7 @@ Constructing a node
     >>> import asyncio
     >>> await_ = asyncio.get_event_loop().run_until_complete
 
-Create a node using the factory method :meth:`Node.from_registers` and start it:
+Create a node using the factory :meth:`make_node` and start it:
 
 >>> import pyuavcan.application
 >>> import uavcan.node                                  # Transcompiled DSDL namespace (see pyuavcan.dsdl).
@@ -59,7 +59,7 @@ Create a node using the factory method :meth:`Node.from_registers` and start it:
 ...     software_version=uavcan.node.Version_1_0(major=1, minor=0),
 ...     name="org.uavcan.pyuavcan.docs",
 ... )
->>> node = pyuavcan.application.Node.from_registers(node_info)
+>>> node = pyuavcan.application.make_node(node_info)
 >>> node.start()
 
 ..  doctest::
@@ -159,8 +159,8 @@ These values were read from from the *registers*, as defined in the UAVCAN Speci
 Those familiar with ROS will find similarities with the *ROS Parameter Server*.
 
 The registers are named values that keep various settings and parameters of the node.
-The factory method :meth:`Node.from_registers` we used above just reads the registers
-and figures out how to construct the node from that: which transport to use, the node-ID, the subject-IDs, and so on.
+The factory :meth:`make_node` we used above just reads the registers and figures out how to construct
+the node from that: which transport to use, the node-ID, the subject-IDs, and so on.
 Any UAVCAN application is also expected to keep its own configuration parameters in the registers so that
 it can be reconfigured and controlled at runtime via UAVCAN.
 
@@ -214,7 +214,7 @@ There are two places:
 - **The register file** which contains a simple key-value database table.
   If the file does not exist (like at the first run), it is automatically created.
   Multiple processes can use the same time concurrently.
-  If no file location is provided when invoking :meth:`Node.from_registers`,
+  If no file location is provided when invoking :meth:`make_node`,
   the registry is stored in memory so that all state is lost when the node is closed.
 
 - **The environment variables.**
@@ -243,7 +243,7 @@ In the following example we use a real register file and emulate some environmen
 ...     "UAVCAN__SERIAL__PORT__STRING":    "socket://localhost:50905",  # UAVCAN/UDP + UAVCAN/serial.
 ...     "M__MOTOR__INDUCTANCE_DQ__REAL64": "0.12 0.13",                 # Application-specific parameters.
 ... }
->>> node = pyuavcan.application.Node.from_registers(
+>>> node = pyuavcan.application.make_node(
 ...     node_info,
 ...     register_file="registers.db",   # Will be created if doesn't exist.
 ...     environment_variables=env,      # Defaults to os.environ, here we override it.
@@ -290,6 +290,8 @@ More complex capabilities are to be set up by the user as needed; some of them a
 
 from ._node import Node as Node, NodeInfo as NodeInfo
 
-from ._transport_factory import make_transport_from_registers as make_transport_from_registers
+from ._node_factory import make_node as make_node
+
+from ._transport_factory import make_transport as make_transport
 
 from . import register as register

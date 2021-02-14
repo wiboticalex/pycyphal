@@ -18,17 +18,16 @@ _logger = logging.getLogger(__name__)
 async def _unittest_slow_node_tracker(compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo]) -> None:
     from . import get_transport
     from uavcan.node import GetInfo_1_0
-    from pyuavcan.presentation import Presentation
-    from pyuavcan.application import Node, NodeInfo
+    from pyuavcan.application import make_node, NodeInfo
     from pyuavcan.application.node_tracker import NodeTracker, Entry
 
     assert compiled
     asyncio.get_running_loop().slow_callback_duration = 3.0
 
-    n_a = Node(Presentation(get_transport(0xA)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.a"))
-    n_b = Node(Presentation(get_transport(0xB)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.b"))
-    n_c = Node(Presentation(get_transport(0xC)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.c"))
-    n_trk = Node(Presentation(get_transport(None)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.trk"))
+    n_a = make_node(NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.a"), transport=get_transport(0xA))
+    n_b = make_node(NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.b"), transport=get_transport(0xB))
+    n_c = make_node(NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.c"), transport=get_transport(0xC))
+    n_trk = make_node(NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.trk"), transport=get_transport(None))
 
     try:
         last_update_args: typing.List[typing.Tuple[int, typing.Optional[Entry], typing.Optional[Entry]]] = []
@@ -189,7 +188,7 @@ async def _unittest_slow_node_tracker(compiled: typing.List[pyuavcan.dsdl.Genera
 
         n_trk.close()
         n_trk.close()  # Idempotency
-        n_trk = Node(Presentation(get_transport(0xDD)), n_trk.info)
+        n_trk = make_node(n_trk.info, transport=get_transport(0xDD))
         n_trk.start()
         trk = NodeTracker(n_trk)
         trk.add_update_handler(validating_handler)
@@ -250,7 +249,7 @@ async def _unittest_slow_node_tracker(compiled: typing.List[pyuavcan.dsdl.Genera
         # Node A is restarted. Node C goes offline.
         n_a.close()
         n_c.close()
-        n_a = Node(Presentation(get_transport(0xA)), NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.a"))
+        n_a = make_node(NodeInfo(name="org.uavcan.pyuavcan.test.node_tracker.a"), transport=get_transport(0xA))
         n_a.heartbeat_publisher.vendor_specific_status_code = 0xFE
         n_a.start()
         await asyncio.sleep(9)

@@ -133,7 +133,8 @@ class Allocatee:
     def close(self) -> None:
         """
         Stop the allocation process. The allocatee automatically closes itself shortly after the allocation is finished,
-        so it's not necessary to invoke this method after a successful allocation. The method is idempotent.
+        so it's not necessary to invoke this method after a successful allocation.
+        The underlying transport is NOT closed. The method is idempotent.
         """
         if self._timer is not None:
             self._timer.cancel()
