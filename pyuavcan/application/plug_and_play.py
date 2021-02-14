@@ -23,6 +23,7 @@ from uavcan.pnp import NodeIDAllocationData_1_0 as NodeIDAllocationData_1
 from uavcan.pnp import NodeIDAllocationData_2_0 as NodeIDAllocationData_2
 from uavcan.node import ID_1_0 as ID
 import pyuavcan
+import pyuavcan.application
 
 
 _PSEUDO_UNIQUE_ID_MASK = (

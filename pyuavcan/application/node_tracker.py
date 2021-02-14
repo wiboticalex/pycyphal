@@ -14,6 +14,7 @@ import logging
 from uavcan.node import Heartbeat_1_0 as Heartbeat
 from uavcan.node import GetInfo_1_0 as GetInfo
 import pyuavcan
+import pyuavcan.application
 
 
 Entry = NamedTuple(

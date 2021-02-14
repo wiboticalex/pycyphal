@@ -47,7 +47,7 @@ class ValueProxyWithFlags(ValueProxy):
         return pyuavcan.util.repr_attributes(self, repr(self.value), mutable=self.mutable, persistent=self.persistent)
 
 
-class Registry(Mapping[str, ValueProxy]):
+class Registry(Mapping[str, ValueProxyWithFlags]):
     """
     The registry (register repository) is the main access point for the application to its registers.
     It is a facade that provides user-friendly API on top of multiple underlying register backends
@@ -176,7 +176,7 @@ class Registry(Mapping[str, ValueProxy]):
 
     def get(self, name: str) -> Optional[ValueProxyWithFlags]:
         """
-        :returns: :class:`ValueProxy` if exists, otherwise None.
+        :returns: :class:`ValueProxyWithFlags` (:class:`ValueProxy`) if exists, otherwise None.
         """
         for b in self._backends:
             ent = b.get(name)

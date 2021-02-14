@@ -15,6 +15,7 @@ from typing import Optional
 from uavcan.diagnostic import Record_1_1 as Record
 from uavcan.diagnostic import Severity_1_0 as Severity
 import pyuavcan
+import pyuavcan.application
 
 
 __all__ = ["DiagnosticSubscriber", "DiagnosticPublisher", "Record", "Severity"]

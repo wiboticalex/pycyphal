@@ -16,6 +16,7 @@ import asyncio
 import uavcan.node
 from uavcan.node import Heartbeat_1_0 as Heartbeat
 import pyuavcan
+import pyuavcan.application
 
 
 class Health(enum.IntEnum):

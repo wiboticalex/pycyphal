@@ -5,6 +5,7 @@
 from __future__ import annotations
 import logging
 import pyuavcan
+import pyuavcan.application
 from pyuavcan.presentation import ServiceRequestMetadata
 from uavcan.register import Access_1_0 as Access
 from uavcan.register import List_1_0 as List
