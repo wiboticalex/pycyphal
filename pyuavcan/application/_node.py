@@ -102,7 +102,7 @@ class Node:
             RegisterServer(self)
             srv_info = self.get_server(uavcan.node.GetInfo_1_0)
         except pyuavcan.transport.OperationNotDefinedForAnonymousNodeError as ex:
-            _logger.info("%r: RPC-servers not launched because the transport is anonymous: %s", ex)
+            _logger.info("%r: RPC-servers not launched because the transport is anonymous: %s", self, ex)
         else:
             self.add_lifetime_hooks(lambda: srv_info.serve_in_background(handle_get_info), srv_info.close)
 

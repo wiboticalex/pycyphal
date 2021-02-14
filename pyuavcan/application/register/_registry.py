@@ -14,7 +14,7 @@ from ._value import RelaxedValue, ValueProxy, Value
 if sys.version_info >= (3, 9):
     from collections.abc import Mapping
 else:  # pragma: no cover
-    from typing import Mapping
+    from typing import Mapping  # pylint: disable=ungrouped-imports
 
 
 class MissingRegisterError(KeyError):
@@ -67,9 +67,9 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
     Moving on:
 
     >>> r = Registry([b0, b1])
-    >>> r.keys()                        # Sorted lexicographically per backend.
+    >>> list(r.keys())                  # Sorted lexicographically per backend.
     ['a', 'c', 'b']
-    >>> Registry([b1, b0]).keys()       # Notice how the order is affected.
+    >>> list(Registry([b1, b0]).keys()) # Notice how the order is affected.
     ['b', 'a', 'c']
     >>> r.index(0), r.index(1), r.index(2), r.index(3)
     ('a', 'c', 'b', None)

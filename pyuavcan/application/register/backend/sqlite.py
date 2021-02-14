@@ -58,7 +58,7 @@ class SQLiteBackend(Backend):
     def keys(self) -> typing.List[str]:
         return [x for x, in self._execute(r"select name from register order by name").fetchall()]
 
-    def get_name_at_index(self, index: int) -> typing.Optional[str]:
+    def index(self, index: int) -> typing.Optional[str]:
         res = self._execute(r"select name from register order by name limit 1 offset ?", index).fetchone()
         return res[0] if res else None
 
@@ -123,7 +123,7 @@ def _unittest_memory() -> None:
     st = SQLiteBackend()
     print(st)
     assert not st.keys()
-    assert not st.get_name_at_index(0)
+    assert not st.index(0)
     assert None is st.get("foo")
     assert st.count() == 0
     st.delete(["foo"])
@@ -146,8 +146,8 @@ def _unittest_memory() -> None:
     assert st.count() == 1
 
     assert ["foo"] == st.keys()
-    assert "foo" == st.get_name_at_index(0)
-    assert None is st.get_name_at_index(1)
+    assert "foo" == st.index(0)
+    assert None is st.index(1)
     st.delete(["baz"])
     assert ["foo"] == st.keys()
     st.delete(["foo", "baz"])

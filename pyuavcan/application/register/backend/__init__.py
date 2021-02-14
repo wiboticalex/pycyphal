@@ -58,7 +58,7 @@ class Backend(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def get_name_at_index(self, index: int) -> typing.Optional[str]:
+    def index(self, index: int) -> typing.Optional[str]:
         """
         :returns: Name of the register at the specified index or None if the index is out of range.
             The ordering is guaranteed to be stable as long as the set of registers is not modified.
@@ -75,7 +75,7 @@ class Backend(abc.ABC):
     @abc.abstractmethod
     def set(self, name: str, value: Value) -> None:
         """
-        If the register does not exist, the behavior is implementation-defined.
+        If the register does not exist, it is either created or nothing is done, depending on the implementation.
         If exists, it will be overwritten unconditionally with the specified value.
         The value shall be of the same type as the register, the caller is responsible to ensure that
         (implementations may lift this restriction if the type can be changed).

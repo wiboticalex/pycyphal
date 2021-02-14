@@ -52,8 +52,7 @@ class GeneratedPackageInfo:
     """
 
 
-# noinspection PyShadowingBuiltins
-def compile(
+def compile(  # pylint: disable=redefined-builtin
     root_namespace_directory: _AnyPath,
     lookup_directories: typing.Optional[typing.List[_AnyPath]] = None,
     output_directory: typing.Optional[_AnyPath] = None,

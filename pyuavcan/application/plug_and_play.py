@@ -335,7 +335,6 @@ class CentralizedAllocator(Allocator):
         self._pub2.publish_soon(msg)
 
 
-# noinspection PyAbstractClass
 class DistributedAllocator(Allocator):
     """
     This class is a placeholder. The implementation is missing (could use help here).
@@ -346,6 +345,9 @@ class DistributedAllocator(Allocator):
     def __init__(self, node: pyuavcan.application.Node):
         assert node
         raise NotImplementedError((self.__doc__ or "").strip())
+
+    def register_node(self, node_id: int, unique_id: Optional[bytes]) -> None:
+        raise NotImplementedError
 
 
 class _AllocationTable:

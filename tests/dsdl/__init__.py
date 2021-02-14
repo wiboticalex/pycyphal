@@ -3,4 +3,4 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from ._util import make_random_object, are_close, expand_service_types
-from .conftest import compile as compile
+from .conftest import compile as compile  # pylint: disable=redefined-builtin

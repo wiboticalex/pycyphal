@@ -24,7 +24,7 @@ _CACHE_FILE_NAME = "pydsdl_cache.pickle.tmp"
 
 
 @functools.lru_cache()
-def compile() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:
+def compile() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:  # pylint: disable=redefined-builtin
     """
     Runs the DSDL package generator against the standard and test namespaces, emits a list of GeneratedPackageInfo.
     Automatically adds the path to the generated packages to sys path to make them importable.

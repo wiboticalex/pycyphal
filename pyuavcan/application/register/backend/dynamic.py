@@ -50,7 +50,7 @@ class DynamicBackend(Backend):
     def keys(self) -> List[str]:
         return list(self._reg.keys())
 
-    def get_name_at_index(self, index: int) -> Optional[str]:
+    def index(self, index: int) -> Optional[str]:
         try:
             return self.keys()[index]
         except LookupError:
@@ -113,7 +113,7 @@ def _unittest_dyn() -> None:
     assert b.count() == 0
     assert b.keys() == []
     assert b.get("foo") is None
-    assert b.get_name_at_index(0) is None
+    assert b.index(0) is None
     b.delete(["foo"])
 
     bar = Value(string=String())
@@ -126,9 +126,9 @@ def _unittest_dyn() -> None:
     b.register("bar", lambda: bar, set_bar)
     assert b.count() == 2
     assert b.keys() == ["bar", "foo"]
-    assert b.get_name_at_index(0) == "bar"
-    assert b.get_name_at_index(1) == "foo"
-    assert b.get_name_at_index(2) is None
+    assert b.index(0) == "bar"
+    assert b.index(1) == "foo"
+    assert b.index(2) is None
 
     e = b.get("foo")
     assert e
