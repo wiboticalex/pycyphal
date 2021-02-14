@@ -110,7 +110,7 @@ class RegisterServer:
         return self._node
 
     async def _handle_list(self, request: List.Request, metadata: ServiceRequestMetadata) -> List.Response:
-        name = self.node.registry.get_name_at_index(request.index)
+        name = self.node.registry.index(request.index)
         _logger.debug("%r: List request index %r name %r %r", self, request.index, name, metadata)
         if name is not None:
             return List.Response(Name(name))
@@ -122,7 +122,7 @@ class RegisterServer:
         if v is not None and v.mutable and not request.value.empty:
             try:
                 v.assign(request.value)
-                self.node.registry.set(name, v)
+                self.node.registry[name] = v
             except ValueConversionError as ex:
                 _logger.debug("%r: Conversion from %r to %r is not possible: %s", self, request.value, v.value, ex)
             except MissingRegisterError as ex:  # pragma: no cover

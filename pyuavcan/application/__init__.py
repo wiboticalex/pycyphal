@@ -289,4 +289,7 @@ More complex capabilities are to be set up by the user as needed; some of them a
 """
 
 from ._node import Node as Node, NodeInfo as NodeInfo
+
 from ._transport_factory import make_transport_from_registers as make_transport_from_registers
+
+from . import register as register

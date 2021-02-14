@@ -5,7 +5,7 @@
 from __future__ import annotations
 import sys
 from fnmatch import fnmatchcase
-from typing import List, TypeVar, Optional, Iterator, Iterable
+from typing import List, Optional, Iterator, Iterable
 import logging
 import pyuavcan
 from . import backend
@@ -15,8 +15,6 @@ if sys.version_info >= (3, 9):
     from collections.abc import Mapping
 else:  # pragma: no cover
     from typing import Mapping
-
-PrimitiveType = TypeVar("PrimitiveType", bound=pyuavcan.dsdl.CompositeObject)
 
 
 class MissingRegisterError(KeyError):
@@ -52,6 +50,7 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
     The registry (register repository) is the main access point for the application to its registers.
     It is a facade that provides user-friendly API on top of multiple underlying register backends
     (see :class:`backend.Backend`).
+    Observe that it implements :class:`Mapping`.
 
     Here's how to use it. First, we need backends to set up the registry on top of:
 
@@ -72,7 +71,7 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
     ['a', 'c', 'b']
     >>> Registry([b1, b0]).keys()       # Notice how the order is affected.
     ['b', 'a', 'c']
-    >>> r.get_name_at_index(0), r.get_name_at_index(1), r.get_name_at_index(2), r.get_name_at_index(3)
+    >>> r.index(0), r.index(1), r.index(2), r.index(3)
     ('a', 'c', 'b', None)
     >>> list(r)                         # The registry keys are iterable.
     ['a', 'c', 'b']
@@ -88,7 +87,7 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
     Traceback (most recent call last):
     ...
     MissingRegisterError: 'baz'
-    >>> r.set("foo", True)      # No such register --> exception. # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> r["foo"] = True         # No such register --> exception. # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
     ...
     MissingRegisterError: 'foo'
@@ -116,19 +115,19 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
     >>> b1.register("bar.ro", lambda: val)          # Read-only register.
     >>> r.get("bar").bools
     [True, False, False]
-    >>> r.set("bar", [0, 1.5, -5])                  # The value type is converted automatically.
+    >>> r["bar"] = [0, 1.5, -5]                     # The value type is converted automatically.
     >>> r["bar"].floats
     [0.0, 1.0, 1.0]
 
     Deleting registers using wildcard matching (every backend where matching names are found is affected):
 
-    >>> r.keys()
+    >>> list(r.keys())
     ['a', 'c', 'foo', 'b', 'bar', 'bar.ro']
-    >>> r.delete("bar*")
-    >>> r.keys()
+    >>> del r["bar*"]
+    >>> list(r.keys())
     ['a', 'c', 'foo', 'b']
-    >>> del r["*a*"]  # This is an alias for delete()
-    >>> r.keys()
+    >>> del r["*a*"]
+    >>> list(r.keys())
     ['c', 'foo', 'b']
     """
 
@@ -157,34 +156,30 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
             b.close()
         self._backends.clear()
 
-    def keys(self) -> List[str]:
-        """
-        Keys may not be unique if different backends redefine the same register. The user should avoid that.
-        """
-        return [n for b in self._backends for n in b.keys()]
-
-    def get_name_at_index(self, index: int) -> Optional[str]:
+    def index(self, index: int) -> Optional[str]:
         """
         This is mostly intended for implementing ``uavcan.register.List``.
         Returns None if index is out of range.
-        The ordering is similar to :meth:`keys` (invalidated by :meth:`bind` and :meth:`delete`).
+        The ordering is like :meth:`__iter__` and :meth:`keys` (invalidated by :meth:`bind` and :meth:`delete`).
         """
-        try:
-            return self.keys()[index]  # This is hugely inefficient. Should iterate through backends instead.
-        except LookupError:
-            return None
-
-    def get(self, name: str) -> Optional[ValueProxyWithFlags]:
-        """
-        :returns: :class:`ValueProxyWithFlags` (:class:`ValueProxy`) if exists, otherwise None.
-        """
-        for b in self._backends:
-            ent = b.get(name)
-            if ent is not None:
-                return ValueProxyWithFlags(ent.value, mutable=ent.mutable, persistent=b.persistent)
+        for i, key in enumerate(self):
+            if i == index:
+                return key
         return None
 
-    def set(self, name: str, value: RelaxedValue) -> None:
+    def __getitem__(self, key: str) -> ValueProxyWithFlags:
+        """
+        :returns: :class:`ValueProxyWithFlags` (:class:`ValueProxy`) if exists.
+        :raises: :class:`MissingRegisterError` (:class:`KeyError`) if no such register.
+        """
+        _ensure_name(key)
+        for b in self._backends:
+            ent = b.get(key)
+            if ent is not None:
+                return ValueProxyWithFlags(ent.value, mutable=ent.mutable, persistent=b.persistent)
+        raise MissingRegisterError(key)
+
+    def __setitem__(self, name: str, value: RelaxedValue) -> None:
         """
         Set if the register exists and the type of the value is matching or can be converted to the register's type.
         The mutability flag may be ignored depending on which backend the register is stored at.
@@ -194,6 +189,7 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
             :class:`MissingRegisterError` (subclass of :class:`KeyError`) if the register does not exist.
             :class:`ValueConversionError` if the register exists but the value cannot be converted to its type.
         """
+        _ensure_name(name)
         for b in self._backends:
             e = b.get(name)
             if e is not None:
@@ -204,46 +200,23 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
         else:
             raise MissingRegisterError(name)
 
-    def delete(self, wildcard: str) -> None:
+    def __delitem__(self, wildcard: str) -> None:
         """
         Remove registers that match the specified wildcard from all backends. Matching is case-sensitive.
-        Count and keys are invalidated.
+        Count and keys are invalidated. **If no matching keys are found, no exception is raised.**
         """
+        _ensure_name(wildcard)
         for b in self._backends:
             names = [n for n in b.keys() if fnmatchcase(n, wildcard)]
             _logger.debug("%r: Deleting %d registers matching %r from %r: %r", self, len(names), wildcard, b, names)
             b.delete(names)
 
-    def __getitem__(self, key: str) -> ValueProxyWithFlags:
-        """
-        Like :meth:`get`, but if the register is missing it raises :class:`MissingRegisterError`
-        (subclass of :class:`KeyError`) instead of returning None.
-        """
-        _ensure_name(key)
-        e = self.get(key)
-        if e is None:
-            raise MissingRegisterError(key)
-        return e
-
-    def __setitem__(self, key: str, value: RelaxedValue) -> None:
-        """
-        See :meth:`set`.
-        """
-        _ensure_name(key)
-        self.set(key, value)
-
-    def __delitem__(self, key: str) -> None:
-        """
-        See :meth:`delete`. If no matching keys are found, no exception is raised.
-        """
-        _ensure_name(key)
-        self.delete(key)
-
     def __iter__(self) -> Iterator[str]:
         """
-        Iterator over names.
+        Iterator over register names. They may not be unique if different backends redefine the same register!
+        The ordering is defined by backend ordering, then lexicographically.
         """
-        return iter(self.keys())
+        return iter(n for b in self._backends for n in b.keys())
 
     def __len__(self) -> int:
         """
