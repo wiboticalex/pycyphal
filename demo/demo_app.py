@@ -64,13 +64,12 @@ class DemoApplication:
             software_version=uavcan.node.Version_1_0(major=1, minor=0),
             name="org.uavcan.pyuavcan.demo.demo_app",
         )
-        # The Node class is basically the central part of the library -- it is the bridge between the application
-        # and the UAVCAN network. Also, it implements certain standard application-layer functions, such as
-        # publishing heartbeats, responding to GetInfo, serving the register API, etc.
-        # The file "my_registers.db" stores the registers of our node (see DSDL namespace uavcan.register).
-        # If the file does not exist, it will be created.
+        # The Node is basically the central part of the library -- it is the bridge between the application and
+        # the UAVCAN network. Also, it implements certain standard application-layer functions, such as publishing
+        # heartbeats, responding to GetInfo, serving the register API, etc. The file "my_registers.db" stores the
+        # registers of our node (see DSDL namespace uavcan.register). If the file does not exist, it will be created.
         # This is optional though; if the application does not require persistent states, this parameter may be omitted.
-        self._node = pyuavcan.application.Node.from_registers(node_info, DemoApplication.REGISTER_FILE)
+        self._node = pyuavcan.application.make_node(node_info, DemoApplication.REGISTER_FILE)
 
         # Published heartbeat fields can be configured as follows.
         self._node.heartbeat_publisher.mode = uavcan.node.Mode_1_0.OPERATIONAL  # type: ignore
