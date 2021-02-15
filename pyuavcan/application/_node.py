@@ -241,11 +241,13 @@ class Node(abc.ABC):
 
     def close(self) -> None:
         """
-        Closes the underlying resources and the application-level functions.
+        Closes the :attr:`presentation` (which includes the transport), the registry, the application-layer functions.
         The user does not have to close every port manually as it will be done automatically.
         This method is idempotent.
         """
         pyuavcan.util.broadcast(self._on_close)()
+        self.presentation.close()
+        self.registry.close()
 
     def add_lifetime_hooks(self, start: Optional[Callable[[], None]], close: Optional[Callable[[], None]]) -> None:
         """

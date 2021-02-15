@@ -133,6 +133,9 @@ def make_node(
     """
     from pyuavcan.transport.redundant import RedundantTransport
 
+    db = SQLiteBackend(register_file or "")
+    registry = register.Registry([db])
+
     def init_transport() -> pyuavcan.transport.Transport:
         if transport is None:
             out = make_transport(registry, reconfigurable=reconfigurable_transport)
@@ -147,8 +150,6 @@ def make_node(
             return out
         return transport
 
-    db = SQLiteBackend(register_file or "")
-    registry = register.Registry([db])
     try:
         for name, value in register.parse_environment_variables(environment_variables):
             if value.empty:
@@ -167,7 +168,7 @@ def make_node(
         # Check if any application-layer functions require instantiation.
         _make_diagnostic_publisher(node)
     except Exception:
-        registry.close()
+        registry.close()  # We do not close the registry at normal exit because it's handed over to the node.
         raise
 
     return node
