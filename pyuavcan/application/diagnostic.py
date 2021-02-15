@@ -108,6 +108,24 @@ class DiagnosticPublisher(logging.Handler):
 
     >>> logging.root.removeHandler(diagnostic_pub)
     >>> node.close()
+
+    The node factory :func:`pyuavcan.application.make_node` actually allows you to do this automatically,
+    so that you don't have to hard-code behaviors in the application sources:
+
+    >>> from pyuavcan.application.register import Value, Natural16, Bit
+    >>> node = make_node(NodeInfo(), transport=LoopbackTransport(1), registers={
+    ...     "uavcan.diagnostic.severity": Value(natural16=Natural16([2])),
+    ...     "uavcan.diagnostic.timestamp": Value(bit=Bit([True])),
+    ... })
+    >>> node.start()
+    >>> sub = node.make_subscriber(Record)
+    >>> logging.info('Test message')
+    >>> msg, _ = get_event_loop().run_until_complete(sub.receive_for(1.0))
+    >>> msg.text.tobytes().decode()
+    'Test message'
+    >>> msg.severity.value == Severity.INFO
+    True
+    >>> node.close()
     """
 
     def __init__(self, node: pyuavcan.application.Node, level: int = logging.WARNING) -> None:

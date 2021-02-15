@@ -115,7 +115,7 @@ class Node(abc.ABC):
               the value will be written into the registry file (see constructor).
 
             - If this is a callable, it will be invoked whenever this register is read.
-              The return type of the callable is either :class:`register.Value` or `register.ValueProxy`.
+              The return type of the callable is either :class:`register.Value` or :class:`register.ValueProxy`.
               Such register will be reported as immutable.
               The registry file is not affected and therefore this change is not persistent.
 

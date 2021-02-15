@@ -3,6 +3,8 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
+import sys
+import itertools
 from typing import Callable, Tuple, Optional, Union, Dict
 from pathlib import Path
 import logging
@@ -12,6 +14,11 @@ from . import register
 from .register.backend.sqlite import SQLiteBackend
 from .register.backend.dynamic import DynamicBackend
 from ._transport_factory import make_transport
+
+if sys.version_info >= (3, 9):
+    from collections.abc import Mapping
+else:  # pragma: no cover
+    from typing import Mapping  # pylint: disable=ungrouped-imports
 
 
 class DefaultNode(Node):
@@ -86,6 +93,7 @@ class DefaultNode(Node):
 def make_node(
     info: NodeInfo,
     register_file: Union[None, str, Path] = None,
+    registers: Optional[Mapping[str, Union[register.ValueProxy, register.Value]]] = None,
     environment_variables: Optional[Dict[str, str]] = None,
     *,
     transport: Optional[pyuavcan.transport.Transport] = None,
@@ -143,6 +151,12 @@ def make_node(
         If path is provided but the file does not exist, it will be created automatically.
         See :attr:`Node.registry`, :meth:`Node.create_register`.
 
+    :param registers:
+        Additional register values that override existing ones.
+        This is intended for those special cases where the application needs to forcibly overwrite certain registers.
+        This is, essentially, a convenience feature because one could also pass these overrides via
+        ``environment_variables``.
+
     :param environment_variables:
         The register values passed via environment variables will be automatically parsed and for each
         register the respective entry in the register file will be updated/created.
@@ -173,8 +187,8 @@ def make_node(
         node-ID value.
 
         Until this is implemented, to run the allocator one needs to construct the transport manually using
-        :func:`make_transport`, then run the allocation client, then re-construct the transport again with the
-        obtained node-ID value, then invoke this factory with the existing transport.
+        :func:`make_transport`, then run the allocation client, then invoke this factory again with something like
+        ``registers={"uavcan.node.id": Value(natural16=Natural16([your_allocated_node_id]))}``.
 
         While tedious, this is not that much of a problem because the PnP protocol is mostly intended for
         hardware nodes rather than software ones.
@@ -199,7 +213,12 @@ def make_node(
         return transport
 
     try:
-        for name, value in register.parse_environment_variables(environment_variables):
+        all_registers = itertools.chain(
+            register.parse_environment_variables(environment_variables),
+            (registers or {}).items(),
+        )
+        for name, value in all_registers:
+            value = register.ValueProxy(value).value
             if value.empty:  # Remove register under this name.
                 try:
                     del db[name]

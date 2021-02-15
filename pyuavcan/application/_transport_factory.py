@@ -114,8 +114,8 @@ def make_transport(
           - If True, a loopback transport will be constructed. This is intended for testing only.
 
     :param registers:
-        A instance of :class:`pyuavcan.application.register.Registry`,
-        or some other mapping of :class:`str` to :class:`pyuavcan.application.register.ValueProxy`.
+        A mapping of :class:`str` to :class:`pyuavcan.application.register.ValueProxy`
+        (e.g., an instance of :class:`pyuavcan.application.register.Registry` or a regular dict).
 
     :param reconfigurable:
         If False (default), the return value is:

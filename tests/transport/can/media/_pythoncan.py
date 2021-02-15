@@ -102,7 +102,7 @@ async def _unittest_can_pythoncan() -> None:
     media_b.close()
 
 
-@pytest.skipif(sys.platform != "linux", "SocketCAN test skipped because the system is not GNU/Linux")  # type: ignore
+@pytest.mark.skipif(sys.platform != "linux", "SocketCAN test requires GNU/Linux")  # type: ignore
 @pytest.mark.asyncio  # type: ignore
 async def _unittest_can_pythoncan_socketcan() -> None:
     asyncio.get_running_loop().slow_callback_duration = 5.0
