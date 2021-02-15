@@ -52,6 +52,7 @@ class DynamicBackend(Backend):
 
     def __init__(self) -> None:
         self._reg: Dict[str, GetSetPair] = {}  # This dict is always sorted lexicographically by key!
+        super().__init__()
 
     @property
     def location(self) -> str:

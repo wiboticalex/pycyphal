@@ -97,6 +97,8 @@ async def _unittest_slow_demo_app(
         {
             # Other registers beyond the transport settings:
             "UAVCAN__NODE__ID__NATURAL16": str(DEMO_APP_NODE_ID),
+            "UAVCAN__DIAGNOSTIC__SEVERITY__NATURAL16": "2",
+            "UAVCAN__DIAGNOSTIC__TIMESTAMP__BIT": "1",
             "UAVCAN__SUB__TEMPERATURE_SETPOINT__ID__NATURAL16": "2345",
             "UAVCAN__SUB__TEMPERATURE_MEASUREMENT__ID__NATURAL16": "2346",
             "UAVCAN__PUB__HEATER_VOLTAGE__ID__NATURAL16": "2347",

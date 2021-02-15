@@ -67,6 +67,7 @@ class SQLiteBackend(Backend):
             commit=True,
         )
         _logger.debug("%r: Initialized with registers: %r", self, self.keys())
+        super().__init__()
 
     @property
     def location(self) -> str:

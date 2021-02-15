@@ -65,7 +65,7 @@ class DefaultNode(Node):
             _logger.debug("%r: Register %r already exists and overwrite not enabled", self, name)
             return
 
-        def unwrap(x: Union[register.Value, register.ValueProxy]) -> register.Value:
+        def strictify(x: Union[register.Value, register.ValueProxy]) -> register.Value:
             if isinstance(x, register.ValueProxy):
                 return x.value
             return x
@@ -73,12 +73,12 @@ class DefaultNode(Node):
         v = value_or_getter_or_getter_setter
         _logger.debug("%r: Create register %r = %r", self, name, v)
         if isinstance(v, (register.Value, register.ValueProxy)):
-            self._backend_sqlite[name] = unwrap(v)
+            self._backend_sqlite[name] = strictify(v)
         elif callable(v):
-            self._backend_dynamic[name] = lambda: unwrap(v())  # type: ignore
+            self._backend_dynamic[name] = lambda: strictify(v())  # type: ignore
         elif isinstance(v, tuple) and len(v) == 2 and all(map(callable, v)):
             g, s = v
-            self._backend_dynamic[name] = (lambda: unwrap(g())), s
+            self._backend_dynamic[name] = (lambda: strictify(g())), s
         else:  # pragma: no cover
             raise TypeError(f"Invalid type of register creation argument: {type(v).__name__}")
 
@@ -97,9 +97,40 @@ def make_node(
     If ``transport`` is given, it will be used as-is (but see argument docs below).
     If not given, a new transport instance will be constructed using :func:`make_transport`.
 
-    Prior to construction, the register file will be updated/extended based on the register values passed
-    via the environment variables (if any).
-    Environment variables that encode empty-valued registers trigger removal of such registers from the file.
+    Prior to construction, the register file will be updated/extended based on the register values passed via the
+    environment variables (if any).
+    Environment variables that encode empty-valued registers trigger removal of such registers from the file
+    (non-existent registers do not trigger an error).
+
+    Aside from the registers that encode the transport configuration (which are documented in :func:`make_transport`),
+    the following registers are considered.
+    They are split into groups by application-layer function they configure.
+
+    ..  list-table:: :mod:`pyuavcan.application.diagnostic`
+        :widths: 1 1 9
+        :header-rows: 1
+
+        * - Register name
+          - Register type
+          - Register semantics
+
+        * - ``uavcan.diagnostic.severity``
+          - ``natural16[1]``
+          - If defined and the value is a valid severity level as defined in ``uavcan.diagnostic.Severity``,
+            the node will publish its application log records of matching severity level to the standard subject
+            ``uavcan.diagnostic.Record`` using :class:`pyuavcan.application.diagnostic.DiagnosticPublisher`.
+            This is done by installing a root handler in :mod:`logging`.
+
+        * - ``uavcan.diagnostic.timestamp``
+          - ``bit[1]``
+          - If defined and true, the published log messages will initialize the synchronized ``timestamp`` field
+            from the log record timestamp provided by the :mod:`logging` library.
+            This is only safe if the UAVCAN network is known to be synchronized on the same time system as the
+            wall clock of the local computer.
+            Otherwise, the timestamp is left at zero (which means "unknown" per Specification).
+
+    Additional functions and their respective registers will be added later (e.g., time synchronization,
+    file server, etc.).
 
     :param info:
         Response object to ``uavcan.node.GetInfo``.
@@ -130,6 +161,24 @@ def make_node(
         which permits runtime reconfiguration.
         If the transport argument is given and it is not a redundant transport, it will be wrapped into one.
         Also see :func:`make_transport`.
+
+    :returns: The constructed node instance.
+
+    :raises: See :func:`make_transport`.
+
+    ..  todo::
+
+        Consider extending this factory with a capability to automatically run the node-ID allocation client
+        :class:`pyuavcan.application.plug_and_play.Allocatee` if the available registers do not encode a non-anonymous
+        node-ID value.
+
+        Until this is implemented, to run the allocator one needs to construct the transport manually using
+        :func:`make_transport`, then run the allocation client, then re-construct the transport again with the
+        obtained node-ID value, then invoke this factory with the existing transport.
+
+        While tedious, this is not that much of a problem because the PnP protocol is mostly intended for
+        hardware nodes rather than software ones.
+        A typical software node would typically obtain its node-ID from the launcher (like Yakut Orchestrator).
     """
     from pyuavcan.transport.redundant import RedundantTransport
 
@@ -183,11 +232,12 @@ def _make_diagnostic_publisher(node: Node) -> None:
 
     from .diagnostic import DiagnosticSubscriber, DiagnosticPublisher
 
-    uavcan_severity = max(uavcan_severity, 0)
-    diag_publisher = DiagnosticPublisher(
-        node,
-        level=DiagnosticSubscriber.SEVERITY_UAVCAN_TO_PYTHON.get(uavcan_severity, logging.CRITICAL),
-    )
+    try:
+        level = DiagnosticSubscriber.SEVERITY_UAVCAN_TO_PYTHON[uavcan_severity]
+    except KeyError:
+        return
+
+    diag_publisher = DiagnosticPublisher(node, level=level)
     try:
         diag_publisher.timestamping_enabled = bool(node.registry["uavcan.diagnostic.timestamp"])
     except KeyError:

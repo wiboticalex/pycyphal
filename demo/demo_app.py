@@ -68,7 +68,8 @@ class DemoApplication:
         # the UAVCAN network. Also, it implements certain standard application-layer functions, such as publishing
         # heartbeats, responding to GetInfo, serving the register API, etc. The file "my_registers.db" stores the
         # registers of our node (see DSDL namespace uavcan.register). If the file does not exist, it will be created.
-        # This is optional though; if the application does not require persistent states, this parameter may be omitted.
+        # This is optional though; if the application does not require persistent states, this parameter may be omitted,
+        # in which case the register file will be stored in-memory.
         self._node = pyuavcan.application.make_node(node_info, DemoApplication.REGISTER_FILE)
 
         # Published heartbeat fields can be configured as follows.
@@ -88,11 +89,11 @@ class DemoApplication:
         self._sub_t_pv = self._node.make_subscriber(uavcan.si.sample.temperature.Scalar_1_0, "temperature_measurement")
         self._pub_v_cmd = self._node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0, "heater_voltage")
 
-        # Create a server. The service-ID is read from standard register "uavcan.srv.least_squares.id".
+        # Create an RPC-server. The service-ID is read from standard register "uavcan.srv.least_squares.id".
         srv_least_squares = self._node.get_server(sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0, "least_squares")
         srv_least_squares.serve_in_background(self._serve_linear_least_squares)
 
-        # Create another server using a standard service type for which a fixed service-ID is defined.
+        # Create another RPC-server using a standard service type for which a fixed service-ID is defined.
         # We don't specify the port name so the service-ID defaults to the fixed port-ID.
         # We could, of course, use it with a different service-ID as well, if needed.
         self._node.get_server(uavcan.node.ExecuteCommand_1_1).serve_in_background(self._serve_execute_command)

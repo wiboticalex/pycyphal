@@ -52,7 +52,7 @@ class Allocatee:
     or until the node-ID of the specified transport instance ceases to be anonymous
     (that could happen if the transport is re-configured by the application locally).
     The status (whether the allocation is finished or still in progress) is to be queried periodically
-    via the method :meth:`get_result`.
+    via :meth:`get_result`.
 
     Uses v1 allocation messages if the transport MTU is small (like if the transport is Classic CAN).
     Switches between v1 and v2 as necessary on the fly if the transport is reconfigured at runtime.
@@ -134,7 +134,7 @@ class Allocatee:
         """
         Stop the allocation process. The allocatee automatically closes itself shortly after the allocation is finished,
         so it's not necessary to invoke this method after a successful allocation.
-        The underlying transport is NOT closed. The method is idempotent.
+        **The underlying transport is NOT closed.** The method is idempotent.
         """
         if self._timer is not None:
             self._timer.cancel()

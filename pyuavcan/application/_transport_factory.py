@@ -27,7 +27,8 @@ def make_transport(
     +-------------------+-------------------+-----------------------------------------------------------------------+
     | Register name     | Register type     | Semantics                                                             |
     +===================+===================+=======================================================================+
-    | ``uavcan.node.id``| ``natural16[1]``  | The node-ID to use. If not provided, the node will be anonymous.      |
+    | ``uavcan.node.id``| ``natural16[1]``  | The node-ID to use. If not provided or the value exceeds the valid    |
+    |                   |                   | range, the constructed node will be anonymous.                        |
     +-------------------+-------------------+-----------------------------------------------------------------------+
 
     ..  list-table:: :mod:`pyuavcan.transport.udp`
@@ -169,6 +170,15 @@ def make_transport(
                        CANTransport(PythonCANMedia('virtual:', mtu=64), local_node_id=123))
     >>> tr.close()
 
+    >>> reg = {
+    ...     "uavcan.udp.ip": Value(string=String("127.99.1.1")),    # Per the standard register specification,
+    ...     "uavcan.node.id": Value(natural16=Natural16([0xFFFF])), # value 0xFFFF also means unset/anonymous.
+    ... }
+    >>> tr = make_transport(reg)
+    >>> tr
+    UDPTransport('127.99.1.1', local_node_id=None, ...)
+    >>> tr.close()
+
     >>> tr = make_transport({})
     >>> tr is None
     True
@@ -184,6 +194,11 @@ def make_transport(
             return None
 
     node_id = get("uavcan.node.id", int)
+    # Per Specification, if uavcan.node.id = 65535, the node-ID is unspecified.
+    # TODO: currently, we raise an error if the node-ID setting exceeds the maximum allowed value for the current
+    # transport, but the spec recommends that we should handle this as if the node-ID was not set at all.
+    if node_id is not None and not (0 <= node_id < 0xFFFF):
+        node_id = None
 
     def udp() -> Iterator[pyuavcan.transport.Transport]:
         try:
