@@ -153,9 +153,10 @@ def make_node(
 
     :param registers:
         Additional register values that override existing ones.
-        This is intended for those special cases where the application needs to forcibly overwrite certain registers.
+        This is intended for those special cases where the application needs to forcibly overwrite certain registers
+        or to ensure that a particular register is removed (by passing an empty value).
         This is, essentially, a convenience feature because one could also pass these overrides via
-        ``environment_variables``.
+        ``environment_variables`` (mind the naming differences though).
 
     :param environment_variables:
         The register values passed via environment variables will be automatically parsed and for each

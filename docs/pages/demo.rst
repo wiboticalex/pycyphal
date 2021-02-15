@@ -6,7 +6,7 @@ Demo application
 The reader is assumed to have at least skimmed through *The UAVCAN Guide* beforehand.
 See `uavcan.org <https://uavcan.org>`_ for details.
 
-This demo has been tested against GNU/Linux and Windows; it is also expected to work with any major OS.
+This demo has been tested against GNU/Linux and Windows; it is also expected to work with any other major OS.
 
 
 Custom data types
@@ -37,8 +37,7 @@ Source code
 -----------
 
 The demo relies on the custom data types presented above.
-In order to run the demo, please copy-paste its source code into a file on your computer
-and update the DSDL paths to match your environment.
+To run it, copy-paste its source code into a file on your computer and update the DSDL paths to match your environment.
 
 .. literalinclude:: /../demo/demo_app.py
    :linenos:
