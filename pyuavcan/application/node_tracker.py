@@ -4,7 +4,7 @@
 
 """
 Keeps track of online nodes by subscribing to ``uavcan.node.Heartbeat`` and requesting ``uavcan.node.GetInfo``
-when necessary; see :class:`NodeTracker`.
+when necessary; see :class:`pyuavcan.application.node_tracker.NodeTracker`.
 """
 
 from __future__ import annotations

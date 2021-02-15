@@ -2,6 +2,11 @@
 # This software is distributed under the terms of the MIT License.
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
+"""
+Implementation of the UAVCAN Register API as defined in the UAVCAN Specification
+(section 5.3 *Application-layer functions*).
+"""
+
 from uavcan.primitive import Empty_1_0 as Empty
 from uavcan.primitive import String_1_0 as String
 from uavcan.primitive import Unstructured_1_0 as Unstructured

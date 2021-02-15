@@ -4,7 +4,7 @@
 
 """
 Publishes ``uavcan.node.Heartbeat`` periodically and provides a couple of basic auxiliary services;
-see :class:`HeartbeatPublisher`.
+see :class:`pyuavcan.application.heartbeat_publisher.HeartbeatPublisher`.
 """
 
 from __future__ import annotations

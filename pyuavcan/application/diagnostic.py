@@ -3,8 +3,8 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 """
-This convenience module implements forwarding between the standard messages ``uavcan.diagnostic.Record``
-over the standard subject-ID and the local logging facilities.
+This module implements forwarding between the standard subject ``uavcan.diagnostic.Record``
+and Python's standard logging facilities (:mod:`logging`).
 """
 
 from __future__ import annotations

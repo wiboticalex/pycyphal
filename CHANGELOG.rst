@@ -14,6 +14,20 @@ v1.2
 
 - Constructor parameter ``anonymous`` for ``UDPTransport`` has been deprecated in favor of ``local_node_id``.
 
+- Refactor the Node API:
+
+  - Add factory function ``make_node()``.
+
+  - Implement the UAVCAN Register API and add port construction factory methods that take port-ID from the registry.
+    This is a major change that allows applications to avoid hard-coding any port-ID whatsoever.
+    The respective configuration is now sourced from the registers, which in turn are read from environment variables
+    and from persistent register files (i.e., configuration files).
+
+  - Rework the documentation accordingly.
+
+- Fix minor issues with logging throughout.
+
+
 v1.1
 ----
 
