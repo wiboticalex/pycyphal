@@ -73,12 +73,12 @@ class DefaultNode(Node):
         v = value_or_getter_or_getter_setter
         _logger.debug("%r: Create register %r = %r", self, name, v)
         if isinstance(v, (register.Value, register.ValueProxy)):
-            self._backend_sqlite.set(name, unwrap(v))
+            self._backend_sqlite[name] = unwrap(v)
         elif callable(v):
-            self._backend_dynamic.register(name, lambda: unwrap(v()))  # type: ignore
+            self._backend_dynamic[name] = lambda: unwrap(v())  # type: ignore
         elif isinstance(v, tuple) and len(v) == 2 and all(map(callable, v)):
             g, s = v
-            self._backend_dynamic.register(name, lambda: unwrap(g()), s)
+            self._backend_dynamic[name] = (lambda: unwrap(g())), s
         else:  # pragma: no cover
             raise TypeError(f"Invalid type of register creation argument: {type(v).__name__}")
 
@@ -99,10 +99,10 @@ def make_node(
 
     Prior to construction, the register file will be updated/extended based on the register values passed
     via the environment variables (if any).
+    Environment variables that encode empty-valued registers trigger removal of such registers from the file.
 
     :param info:
-        The info structure is sent as a response to requests of type ``uavcan.node.GetInfo``;
-        the corresponding server instance is established and run by the node class automatically.
+        Response object to ``uavcan.node.GetInfo``.
 
     :param register_file:
         Path to the SQLite file containing the register database; or, in other words,
@@ -134,15 +134,14 @@ def make_node(
     from pyuavcan.transport.redundant import RedundantTransport
 
     db = SQLiteBackend(register_file or "")
-    registry = register.Registry([db])
 
     def init_transport() -> pyuavcan.transport.Transport:
         if transport is None:
-            out = make_transport(registry, reconfigurable=reconfigurable_transport)
+            out = make_transport(register.Registry([db]), reconfigurable=reconfigurable_transport)
             if out is not None:
                 return out
             raise register.MissingRegisterError(
-                f"Available registers do not encode a valid transport configuration: {list(registry)}"
+                f"Available registers do not encode a valid transport configuration: {list(db)}"
             )
         if not isinstance(transport, RedundantTransport) and reconfigurable_transport:
             out = RedundantTransport()
@@ -152,10 +151,13 @@ def make_node(
 
     try:
         for name, value in register.parse_environment_variables(environment_variables):
-            if value.empty:
-                db.delete([name])
+            if value.empty:  # Remove register under this name.
+                try:
+                    del db[name]
+                except LookupError:
+                    pass
             else:
-                db.set(name, value)
+                db[name] = value
 
         presentation = pyuavcan.presentation.Presentation(init_transport())
         node = DefaultNode(
@@ -168,9 +170,8 @@ def make_node(
         # Check if any application-layer functions require instantiation.
         _make_diagnostic_publisher(node)
     except Exception:
-        registry.close()  # We do not close the registry at normal exit because it's handed over to the node.
+        db.close()  # We do not close the database at normal exit because it's handed over to the node.
         raise
-
     return node
 
 

@@ -3,7 +3,7 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Tuple, Optional, Callable, Dict, List, Sequence
+from typing import Tuple, Optional, Callable, Dict, Iterator, Union
 import logging
 from . import Entry, BackendError, Backend, Value
 
@@ -15,6 +15,39 @@ class DynamicBackend(Backend):
     """
     Register backend where register access is delegated to external getters and setters.
     It does not store values internally.
+    Exceptions raised by getters/setters are wrapped into :class:`BackendError`.
+
+    Create new registers and change value of existing ones using :meth:`__setitem__`.
+
+    >>> from pyuavcan.application.register import Bit
+    >>> b = DynamicBackend()
+    >>> b.persistent
+    False
+    >>> b.get("foo") is None
+    True
+    >>> b.index(0) is None
+    True
+    >>> foo = Value(bit=Bit([True, False, True]))
+    >>> def set_foo(v: Value):
+    ...     global foo
+    ...     foo = v
+    >>> b["foo"] = (lambda: foo), set_foo   # Create new mutable register.
+    >>> b["foo"].mutable
+    True
+    >>> list(b["foo"].value.bit.value)
+    [True, False, True]
+    >>> b["foo"] = Value(bit=Bit([False, True, True]))  # Set new value.
+    >>> list(b["foo"].value.bit.value)
+    [False, True, True]
+    >>> b["foo"] = lambda: foo  # Replace register with a new one that is now immutable.
+    >>> b["foo"] = Value(bit=Bit([False, False, False]))    # Value cannot be changed.
+    >>> list(b["foo"].value.bit.value)
+    [False, True, True]
+    >>> list(b)
+    ['foo']
+    >>> del b["foo"]
+    >>> list(b)
+    []
     """
 
     def __init__(self) -> None:
@@ -30,71 +63,86 @@ class DynamicBackend(Backend):
         """Always false."""
         return False
 
-    def register(
-        self,
-        name: str,
-        getter: Callable[[], Value],
-        setter: Optional[Callable[[Value], None]] = None,
-    ) -> None:
-        """
-        Add a new dynamic register. If such name is already registered, it is overwritten.
-        If only getter is provided, the register will be treated as immutable.
-        """
-        items = list(self._reg.items())
-        items.append((name, (getter, setter)))
-        self._reg = dict(sorted(items, key=lambda x: x[0]))
-
-    def count(self) -> int:
-        return len(self._reg)
-
-    def keys(self) -> List[str]:
-        return list(self._reg.keys())
-
-    def index(self, index: int) -> Optional[str]:
-        try:
-            return self.keys()[index]
-        except LookupError:
-            return None
-
-    def get(self, name: str) -> Optional[Entry]:
-        try:
-            getter, setter = self._reg[name]
-        except LookupError:
-            _logger.debug("%r: Get %r -> (nothing)", self, name)
-            return None
-        try:
-            value = getter()
-        except Exception as ex:
-            raise BackendError(f"Unhandled exception in getter for {name!r}: {ex}") from ex
-        e = Entry(value, mutable=setter is not None)
-        _logger.debug("%r: Get %r -> %r", self, name, e)
-        return e
-
-    def set(self, name: str, value: Value) -> None:
-        """
-        If the register does not exist or is not mutable (no setter), nothing will be done.
-        """
-        try:
-            _, setter = self._reg[name]
-        except LookupError:
-            setter = None
-        if setter is not None:
-            _logger.debug("%r: Set %r <- %r", self, name, value)
-            setter(value)
-        else:
-            _logger.debug("%r: Set %r not supported", self, name)
-
-    def delete(self, names: Sequence[str]) -> None:
-        _logger.debug("%r: Delete %r", self, names)
-        for n in names:
-            try:
-                del self._reg[n]
-            except LookupError:
-                pass
-
     def close(self) -> None:
         """Clears all registered registers."""
         self._reg.clear()
+
+    def index(self, index: int) -> Optional[str]:
+        try:
+            return list(self)[index]
+        except LookupError:
+            return None
+
+    def __getitem__(self, key: str) -> Entry:
+        getter, setter = self._reg[key]
+        try:
+            value = getter()
+        except Exception as ex:
+            raise BackendError(f"Unhandled exception in getter for {key!r}: {ex}") from ex
+        e = Entry(value, mutable=setter is not None)
+        _logger.debug("%r: Get %r -> %r", self, key, e)
+        return e
+
+    def __setitem__(
+        self,
+        key: str,
+        value: Union[
+            Entry,
+            Value,
+            Callable[[], Value],
+            Tuple[Callable[[], Value], Callable[[Value], None]],
+        ],
+    ) -> None:
+        """
+        :param key: The register name.
+
+        :param value:
+            - If this is an instance of :class:`Entry` or :class:`Value`, and the referenced register is mutable,
+              its setter is invoked with the supplied instance of :class:`Value`
+              (if :class:`Entry` is given, the value is extracted from there and the mutability flag is ignored).
+              If the register is immutable, nothing is done.
+              The caller is required to ensure that the type is acceptable.
+
+            - If this is a single callable, a new immutable register is defined (existing registers overwritten).
+
+            - If this is a tuple of two callables, a new mutable register is defined (existing registers overwritten).
+        """
+        if isinstance(value, Entry):
+            value = value.value
+
+        if isinstance(value, Value):
+            try:
+                _, setter = self._reg[key]
+            except LookupError:
+                setter = None
+            if setter is not None:
+                _logger.debug("%r: Set %r <- %r", self, key, value)
+                try:
+                    setter(value)
+                except Exception as ex:
+                    raise BackendError(f"Unhandled exception in setter for {key!r}: {ex}") from ex
+            else:
+                _logger.debug("%r: Set %r not supported", self, key)
+        else:
+            if callable(value):
+                getter, setter = value, None
+            elif isinstance(value, tuple) and len(value) == 2 and all(map(callable, value)):
+                getter, setter = value
+            else:  # pragma: no cover
+                raise TypeError(f"Invalid argument: {value!r}")
+            items = list(self._reg.items())
+            items.append((key, (getter, setter)))
+            self._reg = dict(sorted(items, key=lambda x: x[0]))
+
+    def __delitem__(self, key: str) -> None:
+        _logger.debug("%r: Delete %r", self, key)
+        del self._reg[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._reg)
+
+    def __len__(self) -> int:
+        return len(self._reg)
 
 
 GetSetPair = Tuple[
@@ -110,11 +158,10 @@ def _unittest_dyn() -> None:
 
     b = DynamicBackend()
     assert not b.persistent
-    assert b.count() == 0
-    assert b.keys() == []
+    assert len(b) == 0
+    assert list(b.keys()) == []
     assert b.get("foo") is None
     assert b.index(0) is None
-    b.delete(["foo"])
 
     bar = Value(string=String())
 
@@ -122,10 +169,10 @@ def _unittest_dyn() -> None:
         nonlocal bar
         bar = v
 
-    b.register("foo", lambda: Value(string=String("Hello")))
-    b.register("bar", lambda: bar, set_bar)
-    assert b.count() == 2
-    assert b.keys() == ["bar", "foo"]
+    b["foo"] = lambda: Value(string=String("Hello"))
+    b["bar"] = lambda: bar, set_bar
+    assert len(b) == 2
+    assert list(b.keys()) == ["bar", "foo"]
     assert b.index(0) == "bar"
     assert b.index(1) == "foo"
     assert b.index(2) is None
@@ -142,8 +189,8 @@ def _unittest_dyn() -> None:
     assert e.value.string
     assert e.value.string.value.tobytes().decode() == ""
 
-    b.set("foo", Value(string=String("world")))
-    b.set("bar", Value(string=String("world")))
+    b["foo"] = Value(string=String("world"))
+    b["bar"] = Entry(Value(string=String("world")), mutable=False)  # Flag ignored
 
     e = b.get("foo")
     assert e
@@ -157,9 +204,9 @@ def _unittest_dyn() -> None:
     assert e.value.string
     assert e.value.string.value.tobytes().decode() == "world"
 
-    b.delete(["foo"])
-    assert b.count() == 1
-    assert b.keys() == ["bar"]
+    del b["foo"]
+    assert len(b) == 1
+    assert list(b.keys()) == ["bar"]
 
     b.close()
-    assert b.count() == 0
+    assert len(b) == 0

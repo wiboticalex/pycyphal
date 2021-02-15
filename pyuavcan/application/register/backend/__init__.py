@@ -3,11 +3,17 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
+import sys
 import abc
-import typing
+from typing import Optional, Union
 import dataclasses
 import pyuavcan
 from uavcan.register import Value_1_0 as Value
+
+if sys.version_info >= (3, 9):
+    from collections.abc import MutableMapping
+else:  # pragma: no cover
+    from typing import MutableMapping  # pylint: disable=ungrouped-imports
 
 
 class BackendError(RuntimeError):
@@ -22,9 +28,10 @@ class Entry:
     mutable: bool
 
 
-class Backend(abc.ABC):
+class Backend(MutableMapping[str, Entry]):
     """
-    Register backend interface.
+    Register backend interface implementing the :class:`MutableMapping` interface.
+    The registers are ordered lexicographically by name.
     """
 
     @property
@@ -44,54 +51,29 @@ class Backend(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def count(self) -> int:
-        """
-        Number of registers.
-        """
+    def close(self) -> None:
         raise NotImplementedError
 
     @abc.abstractmethod
-    def keys(self) -> typing.List[str]:
-        """
-        :returns: List of all registers ordered lexicographically.
-        """
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def index(self, index: int) -> typing.Optional[str]:
+    def index(self, index: int) -> Optional[str]:
         """
         :returns: Name of the register at the specified index or None if the index is out of range.
-            The ordering is guaranteed to be stable as long as the set of registers is not modified.
+            See ordering requirements in the class docs.
         """
         raise NotImplementedError
 
     @abc.abstractmethod
-    def get(self, name: str) -> typing.Optional[Entry]:
-        """
-        :returns: None if no such register is available; otherwise :class:`Entry`.
-        """
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def set(self, name: str, value: Value) -> None:
+    def __setitem__(self, key: str, value: Union[Entry, Value]) -> None:
         """
         If the register does not exist, it is either created or nothing is done, depending on the implementation.
         If exists, it will be overwritten unconditionally with the specified value.
+        Observe that the method accepts either :class:`Entry` or :class:`Value`.
+
         The value shall be of the same type as the register, the caller is responsible to ensure that
         (implementations may lift this restriction if the type can be changed).
-        The mutability flag may be ignored.
-        """
-        raise NotImplementedError
 
-    @abc.abstractmethod
-    def delete(self, names: typing.Sequence[str]) -> None:
+        The mutability flag is ignored (it is intended mostly for the UAVCAN Register Interface, not for local use).
         """
-        Removes specified registers from the storage. Non-existent names are simply ignored.
-        """
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def close(self) -> None:
         raise NotImplementedError
 
     def __repr__(self) -> str:

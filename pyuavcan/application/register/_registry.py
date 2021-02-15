@@ -57,10 +57,10 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
     >>> from pyuavcan.application.register.backend.sqlite import SQLiteBackend
     >>> from pyuavcan.application.register.backend.dynamic import DynamicBackend
     >>> b0 = SQLiteBackend()
-    >>> b0.set("c", Value())
-    >>> b0.set("a", Value())
+    >>> b0["c"] = Value()           # Create registry with empty value stored in the SQLite backend.
+    >>> b0["a"] = Value()
     >>> b1 = DynamicBackend()
-    >>> b1.register("b", lambda: Value())
+    >>> b1["b"] = lambda: Value()   # Create immutable (read-only) non-persistent dynamic register.
 
     We can modify backends and add additional ones after the registry is set up --
     it doesn't keep any internal state and is fully transparent.
@@ -81,18 +81,18 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
     Get/set behaviors:
 
     >>> from pyuavcan.application.register import Bit
-    >>> r.get("foo") is None    # No such register --> None.
+    >>> r.get("foo") is None            # No such register --> None.
     True
-    >>> r["foo"]                # This is an alternative to get(). # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> r["foo"]                        # This is an alternative to get(). # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
     ...
     MissingRegisterError: 'baz'
-    >>> r["foo"] = True         # No such register --> exception. # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> r["foo"] = True                 # No such register --> exception. # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
     ...
     MissingRegisterError: 'foo'
-    >>> b0.set("foo", Value(bit=Bit([True, False])))    # Create register "foo" in the SQLite backend.
-    >>> e = r.get("foo")                                # Now it is gettable.
+    >>> b0["foo"] = Value(bit=Bit([True, False]))       # Create register "foo" in the SQLite backend.
+    >>> e = r["foo"]                                    # Now it is gettable.
     >>> e.bools    # Use the proxy properties to automatically convert the register value to a native type.
     [True, False]
     >>> e.ints
@@ -111,9 +111,9 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
     >>> def set_val(v: Value):
     ...     global val
     ...     val = v
-    >>> b1.register("bar", lambda: val, set_val)
-    >>> b1.register("bar.ro", lambda: val)          # Read-only register.
-    >>> r.get("bar").bools
+    >>> b1["bar"]   = (lambda: val), set_val        # Create mutable dynamic register.
+    >>> b1["bar.ro"] = lambda: val                  # Create immutable (read-only) dynamic register.
+    >>> r["bar"].bools
     [True, False, False]
     >>> r["bar"] = [0, 1.5, -5]                     # The value type is converted automatically.
     >>> r["bar"].floats
@@ -195,7 +195,7 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
             if e is not None:
                 c = ValueProxy(e.value)
                 c.assign(value)
-                b.set(name, c.value)
+                b[name] = c.value
                 break
         else:
             raise MissingRegisterError(name)
@@ -209,7 +209,8 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
         for b in self._backends:
             names = [n for n in b.keys() if fnmatchcase(n, wildcard)]
             _logger.debug("%r: Deleting %d registers matching %r from %r: %r", self, len(names), wildcard, b, names)
-            b.delete(names)
+            for n in names:
+                del b[n]
 
     def __iter__(self) -> Iterator[str]:
         """
@@ -222,7 +223,7 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
         """
         Number of registers in all backends.
         """
-        return sum(x.count() for x in self._backends)
+        return sum(map(len, self._backends))
 
     def __repr__(self) -> str:
         return pyuavcan.util.repr_attributes(self, self._backends)

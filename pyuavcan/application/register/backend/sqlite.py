@@ -3,7 +3,7 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-import typing
+from typing import Union, Optional, Iterator, Any
 from pathlib import Path
 import logging
 import sqlite3
@@ -23,9 +23,33 @@ class SQLiteBackend(Backend):
     """
     Register storage backend implementation based on SQLite.
     Supports either persistent on-disk single-file storage or volatile in-memory storage.
+
+    >>> b = SQLiteBackend("my_register_file.db")
+    >>> b.persistent    # If a file is specified, the storage is persistent.
+    True
+    >>> b.location
+    'my_register_file.db'
+    >>> b.close()
+    >>> b = SQLiteBackend()
+    >>> b.persistent    # If no file is specified, the data is kept in-memory.
+    False
+    >>> from pyuavcan.application.register import Bit
+    >>> b["foo"] = Value(bit=Bit([True, False, True]))   # Create new register.
+    >>> b["foo"].mutable
+    True
+    >>> list(b["foo"].value.bit.value)
+    [True, False, True]
+    >>> b["foo"] = Value(bit=Bit([False, True, True]))  # Set new value.
+    >>> list(b["foo"].value.bit.value)
+    [False, True, True]
+    >>> list(b)
+    ['foo']
+    >>> del b["foo"]
+    >>> list(b)
+    []
     """
 
-    def __init__(self, location: typing.Union[str, Path] = ""):
+    def __init__(self, location: Union[str, Path] = ""):
         """
         :param location: Either a path to the database file, or None. If None, the data will be stored in memory.
         """
@@ -52,59 +76,60 @@ class SQLiteBackend(Backend):
     def persistent(self) -> bool:
         return self._loc.lower() != _LOCATION_VOLATILE
 
-    def count(self) -> int:
-        return int(self._execute(r"select count(*) from register").fetchone()[0])
+    def close(self) -> None:
+        _logger.debug("%r: Closing", self)
+        self._db.close()
 
-    def keys(self) -> typing.List[str]:
-        return [x for x, in self._execute(r"select name from register order by name").fetchall()]
-
-    def index(self, index: int) -> typing.Optional[str]:
+    def index(self, index: int) -> Optional[str]:
         res = self._execute(r"select name from register order by name limit 1 offset ?", index).fetchone()
         return res[0] if res else None
 
-    def get(self, name: str) -> typing.Optional[Entry]:
-        res = self._execute(r"select mutable, value from register where name = ?", name).fetchone()
+    def __getitem__(self, key: str) -> Entry:
+        res = self._execute(r"select mutable, value from register where name = ?", key).fetchone()
         if res is None:
-            _logger.debug("%r: Get %r -> (nothing)", self, name)
-            return None
+            raise KeyError(key)
         mutable, value = res
         assert isinstance(value, bytes)
         obj = pyuavcan.dsdl.deserialize(Value, [memoryview(value)])
         if obj is None:  # pragma: no cover
-            _logger.warning("%r: Value of %r is not a valid serialization of %s: %r", self, name, Value, value)
-            return None
+            _logger.warning("%r: Value of %r is not a valid serialization of %s: %r", self, key, Value, value)
+            raise KeyError(key)
         e = Entry(value=obj, mutable=bool(mutable))
-        _logger.debug("%r: Get %r -> %r", self, name, e)
+        _logger.debug("%r: Get %r -> %r", self, key, e)
         return e
 
-    def set(self, name: str, value: Value) -> None:
+    def __setitem__(self, key: str, value: Union[Entry, Value]) -> None:
         """
         If the register does not exist, it will be implicitly created.
+        If the value is an instance of :class:`Value`, the mutability flag defaults to True.
         """
-        e = Entry(value, mutable=True)  # Mutability flag may be made mutable later.
-        _logger.debug("%r: Set %r <- %r", self, name, e)
+        if isinstance(value, Value):
+            e = Entry(value, mutable=True)
+        elif isinstance(value, Entry):
+            e = value
+        else:  # pragma: no cover
+            raise TypeError(f"Unexpected argument: {value!r}")
+        _logger.debug("%r: Set %r <- %r", self, key, e)
         # language=SQLite
         self._execute(
             r"insert or replace into register (name, value, mutable) values (?, ?, ?)",
-            name,
+            key,
             b"".join(pyuavcan.dsdl.serialize(e.value)),
             e.mutable,
             commit=True,
         )
 
-    def delete(self, names: typing.Sequence[str]) -> None:
-        _logger.debug("%r: Delete %r", self, names)
-        try:
-            self._db.executemany(r"delete from register where name = ?", ((x,) for x in names))
-            self._db.commit()
-        except sqlite3.OperationalError as ex:
-            raise BackendError(f"Could not delete {len(names)} registers: {ex}") from ex
+    def __delitem__(self, key: str) -> None:
+        _logger.debug("%r: Delete %r", self, key)
+        self._execute(r"delete from register where name = ?", key, commit=True)
 
-    def close(self) -> None:
-        _logger.debug("%r: Closing", self)
-        self._db.close()
+    def __iter__(self) -> Iterator[str]:
+        return iter(x for x, in self._execute(r"select name from register order by name").fetchall())
 
-    def _execute(self, statement: str, *params: typing.Any, commit: bool = False) -> sqlite3.Cursor:
+    def __len__(self) -> int:
+        return int(self._execute(r"select count(*) from register").fetchone()[0])
+
+    def _execute(self, statement: str, *params: Any, commit: bool = False) -> sqlite3.Cursor:
         try:
             cur = self._db.execute(statement, params)
             if commit:
@@ -125,34 +150,33 @@ def _unittest_memory() -> None:
     assert not st.keys()
     assert not st.index(0)
     assert None is st.get("foo")
-    assert st.count() == 0
-    st.delete(["foo"])
+    assert len(st) == 0
+    del st["foo"]
 
-    st.set("foo", Value(string=String("Hello world!")))
+    st["foo"] = Value(string=String("Hello world!"))
     e = st.get("foo")
     assert e
     assert e.value.string
     assert e.value.string.value.tobytes().decode() == "Hello world!"
     assert e.mutable
-    assert st.count() == 1
+    assert len(st) == 1
 
     # Override the same register.
-    st.set("foo", Value(unstructured=Unstructured([1, 2, 3])))
+    st["foo"] = Value(unstructured=Unstructured([1, 2, 3]))
     e = st.get("foo")
     assert e
     assert e.value.unstructured
     assert e.value.unstructured.value.tobytes() == b"\x01\x02\x03"
     assert e.mutable
-    assert st.count() == 1
+    assert len(st) == 1
 
-    assert ["foo"] == st.keys()
+    assert ["foo"] == list(st.keys())
     assert "foo" == st.index(0)
     assert None is st.index(1)
-    st.delete(["baz"])
-    assert ["foo"] == st.keys()
-    st.delete(["foo", "baz"])
-    assert [] == st.keys()
-    assert st.count() == 0
+    assert ["foo"] == list(st.keys())
+    del st["foo"]
+    assert [] == list(st.keys())
+    assert len(st) == 0
 
     st.close()
 
@@ -166,15 +190,15 @@ def _unittest_file() -> None:
     print("DB file:", db_file)
     st = SQLiteBackend(db_file)
     print(st)
-    st.set("a", Value(unstructured=Unstructured([1, 2, 3])))
-    st.set("b", Value(unstructured=Unstructured([4, 5, 6])))
-    assert st.count() == 2
+    st["a"] = Value(unstructured=Unstructured([1, 2, 3]))
+    st["b"] = Value(unstructured=Unstructured([4, 5, 6]))
+    assert len(st) == 2
     st.close()
 
     # Then re-open it in writeable mode and ensure correctness.
     st = SQLiteBackend(db_file)
     print(st)
-    assert st.count() == 2
+    assert len(st) == 2
     e = st.get("a")
     assert e
     assert e.value.unstructured
