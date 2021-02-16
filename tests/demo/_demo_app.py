@@ -88,8 +88,7 @@ async def _unittest_slow_demo_app(
         # At the first run, force the demo script to regenerate packages.
         # The following runs shall not force this behavior to save time and enhance branch coverage.
         print("FORCE DSDL RECOMPILATION")
-        for p in Path().cwd().resolve().glob(".demo_app.*.compiled"):
-            shutil.rmtree(p)
+        shutil.rmtree(Path(".demo_dsdl_compiled").resolve(), ignore_errors=True)
 
     # The demo may need to generate packages as well, so we launch it first.
     env = run_config.env.copy()

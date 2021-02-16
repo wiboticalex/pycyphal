@@ -11,7 +11,7 @@ from pathlib import Path
 
 NAME = "demo_app"
 
-DSDL_NAMESPACE_DIRS = [  # DSDL namespace directories that are to be compiled.
+DSDL_NAMESPACE_DIRS = [  # DSDL namespace directories that are to be compiled and distributed with the app.
     "public_regulated_data_types/uavcan",  # All UAVCAN applications without exception need the standard namespace.
     "custom_data_types/sirius_cyber_corp",
     # "public_regulated_data_types/reg",  # Many applications need the non-standard regulated namespace as well.
@@ -21,21 +21,17 @@ DSDL_NAMESPACE_DIRS = [  # DSDL namespace directories that are to be compiled.
 # noinspection PyUnresolvedReferences
 class BuildPy(distutils.command.build_py.build_py):
     def run(self):
-        # The application should expect to find the compiled DSDL under this path in the distribution archive:
-        output = Path(self.build_lib, NAME, "compiled_dsdl").resolve()
         if not self.dry_run:
             import pyuavcan
 
-            for nd in DSDL_NAMESPACE_DIRS:
-                pyuavcan.dsdl.compile(nd, lookup_directories=DSDL_NAMESPACE_DIRS, output_directory=output)
+            pyuavcan.dsdl.compile_all(DSDL_NAMESPACE_DIRS, Path(self.build_lib, NAME, ".demo_dsdl_compiled"))
         super().run()
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)-3.3s %(name)s: %(message)s")
 
-# This is only a basic example. Normally you would use setup.cfg or pyproject.toml.
 setuptools.setup(
     name=NAME,
     py_modules=["demo_app"],
-    cmdclass={"build_py": BuildPy},  # Override the standard build_py command to add code generation step.
+    cmdclass={"build_py": BuildPy},
 )

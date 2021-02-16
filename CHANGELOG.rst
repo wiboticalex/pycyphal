@@ -27,6 +27,8 @@ v1.2
 
 - Fix minor issues with logging throughout.
 
+- In ``pyuavcan.dsdl``: rename ``generate_package`` into ``compile``, add ``compile_all``.
+
 
 v1.1
 ----

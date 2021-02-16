@@ -153,8 +153,8 @@ class Node(abc.ABC):
 
     def make_publisher(self, dtype: Type[MessageClass], port_name: str = "") -> Publisher[MessageClass]:
         """
-        Wrapper over :meth:`Presentation.make_publisher` that takes the subject-ID from the standard register
-        ``uavcan.pub.PORT_NAME.id``.
+        Wrapper over :meth:`pyuavcan.presentation.Presentation.make_publisher`
+        that takes the subject-ID from the standard register ``uavcan.pub.PORT_NAME.id``.
         If the register is missing, the fixed subject-ID is used unless it is also missing.
         The type information is automatically exposed via ``uavcan.pub.PORT_NAME.type`` based on dtype.
         For details on the standard registers see Specification.
@@ -165,8 +165,8 @@ class Node(abc.ABC):
 
     def make_subscriber(self, dtype: Type[MessageClass], port_name: str = "") -> Subscriber[MessageClass]:
         """
-        Wrapper over :meth:`Presentation.make_subscriber` that takes the subject-ID from the standard register
-        ``uavcan.sub.PORT_NAME.id``.
+        Wrapper over :meth:`pyuavcan.presentation.Presentation.make_subscriber`
+        that takes the subject-ID from the standard register ``uavcan.sub.PORT_NAME.id``.
         If the register is missing, the fixed subject-ID is used unless it is also missing.
         The type information is automatically exposed via ``uavcan.sub.PORT_NAME.type`` based on dtype.
         For details on the standard registers see Specification.
@@ -177,8 +177,8 @@ class Node(abc.ABC):
 
     def make_client(self, dtype: Type[ServiceClass], server_node_id: int, port_name: str = "") -> Client[ServiceClass]:
         """
-        Wrapper over :meth:`Presentation.make_client` that takes the service-ID from the standard register
-        ``uavcan.cln.PORT_NAME.id``.
+        Wrapper over :meth:`pyuavcan.presentation.Presentation.make_client`
+        that takes the service-ID from the standard register ``uavcan.cln.PORT_NAME.id``.
         If the register is missing, the fixed service-ID is used unless it is also missing.
         The type information is automatically exposed via ``uavcan.cln.PORT_NAME.type`` based on dtype.
         For details on the standard registers see Specification.
@@ -193,8 +193,8 @@ class Node(abc.ABC):
 
     def get_server(self, dtype: Type[ServiceClass], port_name: str = "") -> Server[ServiceClass]:
         """
-        Wrapper over :meth:`Presentation.get_server` that takes the service-ID from the standard register
-        ``uavcan.srv.PORT_NAME.id``.
+        Wrapper over :meth:`pyuavcan.presentation.Presentation.get_server`
+        that takes the service-ID from the standard register ``uavcan.srv.PORT_NAME.id``.
         If the register is missing, the fixed service-ID is used unless it is also missing.
         The type information is automatically exposed via ``uavcan.srv.PORT_NAME.type`` based on dtype.
         For details on the standard registers see Specification.

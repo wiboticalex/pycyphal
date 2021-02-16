@@ -11,39 +11,28 @@ import logging
 import importlib
 import pyuavcan
 
-# We will need a directory to store the transcompiled Python packages in. In this example we use a fixed directory
-# and shard its contents by the library version number. The sharding ensures that we won't attempt to use a package
-# compiled for an older library version with a newer one, as they may be incompatible. When packaging applications
-# for distribution, consider including transcompiled packages rather than generating them at runtime.
-dsdl_compiled_dir = pathlib.Path(f".demo_app.pyuavcan{pyuavcan.__version__}.compiled").resolve()
+# Production applications are recommended to compile their DSDL namespaces as part of the build process. The enclosed
+# file "setup.py" provides an example of how to do that. The output path we specify here shall match that of "setup.py".
+# Here we use lazy generation to demonstrate an alternative.
+compiled_dsdl_dir = pathlib.Path(__file__).resolve().parent / ".demo_dsdl_compiled"
 
-# We will need to import the packages once they are compiled, so we should update the module import look-up path set.
-# If you're using an IDE for development, add this path to its look-up set as well for code completion to work.
-sys.path.insert(0, str(dsdl_compiled_dir))
+# Make the compilation outputs importable. Let your IDE index this directory as sources to enable code completion.
+sys.path.insert(0, str(compiled_dsdl_dir))
 
-# Now we can import our packages. If import fails, invoke the transcompiler, then import again.
 try:
     import sirius_cyber_corp  # This is our vendor-specific root namespace. Custom data types.
     import pyuavcan.application  # This module requires the root namespace "uavcan" to be transcompiled.
-except (ImportError, AttributeError):
+except (ImportError, AttributeError):  # Redistributable applications typically don't need this section.
     logging.warning("Transcompiling DSDL, this may take a while")
     src_dir = pathlib.Path(__file__).resolve().parent
-    # Compile our application-specific namespace. It may make use of the standard data types (most namespaces do,
-    # because the standard root namespace contains important basic types), so we include it in the lookup path set.
-    # The paths are hard-coded here for the sake of conciseness.
-    pyuavcan.dsdl.compile(
-        root_namespace_directory=src_dir / "custom_data_types/sirius_cyber_corp",
-        lookup_directories=[src_dir / "public_regulated_data_types/uavcan/"],
-        output_directory=dsdl_compiled_dir,
+    pyuavcan.dsdl.compile_all(
+        [
+            src_dir / "custom_data_types/sirius_cyber_corp",
+            src_dir / "public_regulated_data_types/uavcan/",
+        ],
+        output_directory=compiled_dsdl_dir,
     )
-    # Compile the standard namespace. The order actually doesn't matter.
-    pyuavcan.dsdl.compile(
-        root_namespace_directory=src_dir / "public_regulated_data_types/uavcan/",
-        output_directory=dsdl_compiled_dir,
-    )
-    # Okay, we can try importing again. We need to clear the import cache first because Python's import machinery
-    # requires that; see the docs for importlib.invalidate_caches() for more info.
-    importlib.invalidate_caches()
+    importlib.invalidate_caches()  # Python runtime requires this.
     import sirius_cyber_corp
     import pyuavcan.application
 
@@ -57,6 +46,11 @@ import uavcan.si.unit.voltage  # noqa
 
 class DemoApplication:
     REGISTER_FILE = "my_registers.db"
+    """
+    The register file stores configuration parameters of the local application/node. The registers can be modified
+    at launch via environment variables and at runtime via RPC-service "uavcan.register.Access".
+    The file will be created automatically if it doesn't exist.
+    """
 
     def __init__(self) -> None:
         node_info = uavcan.node.GetInfo_1_0.Response(
@@ -64,7 +58,7 @@ class DemoApplication:
             software_version=uavcan.node.Version_1_0(major=1, minor=0),
             name="org.uavcan.pyuavcan.demo.demo_app",
         )
-        # The Node is basically the central part of the library -- it is the bridge between the application and
+        # The Node class is basically the central part of the library -- it is the bridge between the application and
         # the UAVCAN network. Also, it implements certain standard application-layer functions, such as publishing
         # heartbeats, responding to GetInfo, serving the register API, etc. The file "my_registers.db" stores the
         # registers of our node (see DSDL namespace uavcan.register). If the file does not exist, it will be created.
@@ -161,7 +155,9 @@ class DemoApplication:
         self._sub_t_sp.receive_in_background(on_setpoint)  # IoC-style handler.
 
         # Read the application settings from the registry.
-        gain_p, _gain_i, _gain_d = self._node.registry["thermostat.pid.gains"].floats
+        gain_p, gain_i, gain_d = self._node.registry["thermostat.pid.gains"].floats
+
+        logging.info("Application started with PID gains: %.3f %.3f %.3f", gain_p, gain_i, gain_d)
 
         # This loop will exit automatically when the node is close()d. It is also possible to use receive() instead.
         async for m, _metadata in self._sub_t_pv:

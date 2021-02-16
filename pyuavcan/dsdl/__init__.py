@@ -23,6 +23,7 @@ Below is the inheritance diagram for the classes defined in this module.
 """
 
 from ._compiler import compile as compile  # pylint: disable=redefined-builtin
+from ._compiler import compile_all as compile_all
 from ._compiler import GeneratedPackageInfo as GeneratedPackageInfo
 
 from ._composite_object import serialize as serialize

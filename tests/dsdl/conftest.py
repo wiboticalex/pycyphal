@@ -52,23 +52,14 @@ def compile() -> typing.List[pyuavcan.dsdl.GeneratedPackageInfo]:  # pylint: dis
     pydsdl_logging_level = pydsdl_logger.level
     try:
         pydsdl_logger.setLevel(logging.INFO)
-        out = [
-            pyuavcan.dsdl.compile(
+        out = pyuavcan.dsdl.compile_all(
+            [
                 DEMO_DIR / "public_regulated_data_types" / "uavcan",
-                [],
-                DESTINATION_DIR,
-            ),
-            pyuavcan.dsdl.compile(
                 DEMO_DIR / "custom_data_types" / "sirius_cyber_corp",
-                [],
-                DESTINATION_DIR,
-            ),
-            pyuavcan.dsdl.compile(
                 SELF_DIR / "test_dsdl_namespace",
-                [DEMO_DIR / "public_regulated_data_types" / "uavcan"],
-                DESTINATION_DIR,
-            ),
-        ]
+            ],
+            DESTINATION_DIR,
+        )
     finally:
         pydsdl_logger.setLevel(pydsdl_logging_level)
 
