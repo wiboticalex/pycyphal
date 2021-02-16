@@ -4,3 +4,4 @@
 
 from ._util import make_random_object, are_close, expand_service_types
 from .conftest import compile as compile  # pylint: disable=redefined-builtin
+from .conftest import DEMO_DIR as DEMO_DIR
