@@ -89,7 +89,7 @@ Publishers and subscribers
 Create a publisher and publish a message:
 
 >>> import uavcan.si.unit.voltage
->>> pub_voltage  = node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0,  "measured_voltage")
+>>> pub_voltage = node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0, "measured_voltage")
 >>> pub_voltage.publish_soon(uavcan.si.unit.voltage.Scalar_1_0(402.15))     # Publish message asynchronously.
 >>> await_(pub_voltage.publish(uavcan.si.unit.voltage.Scalar_1_0(402.15)))  # Or synchronously.
 True
@@ -133,7 +133,7 @@ Define an RPC-service of an application-specific type:
 Invoke the service we defined above assuming that it is served by node 42:
 
 >>> from sirius_cyber_corp import PointXY_1_0
->>> cln_least_sq = node.make_client(PerformLinearLeastSquaresFit_1_0, server_node_id=42, port_name="least_squares")
+>>> cln_least_sq = node.make_client(PerformLinearLeastSquaresFit_1_0, 42, "least_squares")
 >>> req = PerformLinearLeastSquaresFit_1_0.Request([PointXY_1_0(10, 1), PointXY_1_0(20, 2)])
 >>> response, metadata = await_(cln_least_sq.call(req))
 >>> round(response.slope, 1), round(response.y_intercept, 1)
@@ -141,7 +141,7 @@ Invoke the service we defined above assuming that it is served by node 42:
 
 Here is another example showcasing the use of a standard service with a fixed port-ID:
 
->>> client_node_info = node.make_client(uavcan.node.GetInfo_1_0, server_node_id=42)
+>>> client_node_info = node.make_client(uavcan.node.GetInfo_1_0, 42)    # Port name is not required.
 >>> response, metadata = await_(client_node_info.call(uavcan.node.GetInfo_1_0.Request()))
 >>> response.software_version
 uavcan.node.Version.1.0(major=1, minor=0)
@@ -209,7 +209,7 @@ It is often useful to have dynamic registers that are never stored but computed 
 [..., ..., ..., ...]
 
 But the above does not explain where did the example get the register values from.
-There are two places:
+There are three places:
 
 - **The register file** which contains a simple key-value database table.
   If the file does not exist (like at the first run), it is automatically created.
@@ -232,32 +232,52 @@ There are two places:
   For example, register ``m.motor.inductance_dq`` of type ``real64[2]`` and value (0.12, 0.13)
   is passed as an environment variable named ``M__MOTOR__INDUCTANCE_DQ__REAL64`` assigned ``0.12 0.13``.
 
-When the environment variables are parsed, the values stored in the register file are automatically updated.
+  When the environment variables are parsed, the values stored in the register file are automatically updated.
 
-In the following example we use a real register file and emulate some environment variables for demo purposes:
+- **Explicit registers.**
+  The application can pass registers explicitly to override all of the above and update the register file accordingly.
 
->>> env = {
-...     "UAVCAN__NODE__ID__NATURAL16":     "42",            # The name and type are defined by the UAVCAN Specification.
-...     "UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16": "6543",
-...     "UAVCAN__UDP__IP__STRING":         "127.63.0.0",                # Setup a heterogeneously redundant transport:
-...     "UAVCAN__SERIAL__PORT__STRING":    "socket://localhost:50905",  # UAVCAN/UDP + UAVCAN/serial.
-...     "M__MOTOR__INDUCTANCE_DQ__REAL64": "0.12 0.13",                 # Application-specific parameters.
-... }
->>> node = pyuavcan.application.make_node(
-...     node_info,
-...     register_file="registers.db",   # Will be created if doesn't exist.
-...     environment_variables=env,      # Defaults to os.environ, here we override it.
-... )
->>> node.registry["uavcan.node.id"].ints
-[42]
->>> node.registry["uavcan.pub.measured_voltage.id"].ints
-[6543]
->>> str(node.registry["uavcan.udp.ip"])  # Multiple whitespace-separated addresses encode redundant configuration.
-'127.63.0.0'
->>> str(node.registry["uavcan.serial.port"])  # Normally it's like "/dev/ttyUSB0", "COM9", etc (possibly redundant).
-'socket://localhost:50905'
->>> node.registry["m.motor.inductance_dq"].floats
+..  doctest::
+    :hide:
+
+    >>> import os
+    >>> os.environ["UAVCAN__NODE__ID__NATURAL16"]                   = "42"
+    >>> os.environ["UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16"]  = "6543"
+    >>> os.environ["UAVCAN__UDP__IP__STRING"]                       = "127.63.0.0"
+    >>> os.environ["UAVCAN__SERIAL__PORT__STRING"]                  = "socket://localhost:50905"
+    >>> os.environ["M__MOTOR__INDUCTANCE_DQ__REAL64"]               = "0.12 0.13"
+
+>>> import os
+>>> for k in os.environ:  # Suppose that the following environment variables were passed to our process:
+...     if "__" in k:
+...         print(k.ljust(47), os.environ[k])
+UAVCAN__NODE__ID__NATURAL16                     42
+UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16    6543
+UAVCAN__UDP__IP__STRING                         127.63.0.0
+UAVCAN__SERIAL__PORT__STRING                    socket://localhost:50905
+M__MOTOR__INDUCTANCE_DQ__REAL64                 0.12 0.13
+>>> node = pyuavcan.application.make_node(node_info, "registers.db")   # The file will be created if doesn't exist.
+>>> node.id
+42
+>>> node.presentation.transport     # Heterogeneously redundant transport: UDP+Serial, as specified in env vars.
+RedundantTransport(UDPTransport('127.63.0.42', ...), SerialTransport('socket://localhost:50905', ...))
+>>> pub_voltage = node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0, "measured_voltage")
+>>> pub_voltage.port_id
+6543
+>>> pub_voltage.close()
+>>> node.registry["m.motor.inductance_dq"].floats   # Application parameters.
 [0.12, 0.13]
+>>> node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0, "no_such_port")  # doctest: +IGNORE_EXCEPTION_DETAIL
+Traceback (most recent call last):
+...
+MissingRegisterError: 'uavcan.pub.no_such_port.id'
+
+..  doctest::
+    :hide:
+
+    >>> for k in os.environ:
+    ...     if "__" in k:
+    ...         del os.environ[k]
 
 Naturally, in order to launch a node one would need to export the required environment variables.
 While this can be done trivially using a shell script or something similar,
@@ -265,12 +285,6 @@ we recommend using the UAVCAN orchestrator implemented in the Yakut command-line
 (those familiar with ROS will find certain parallels with roslaunch).
 It allows one to define UAVCAN network configuration in YAML files with first-class support for passing
 registers via environment variables.
-
-It is also possible to just hard-code a specific node configuration instead of relying on the registers
-by manually initializing an instance of :class:`pyuavcan.transport.Transport`,
-then :class:`pyuavcan.presentation.Presentation`,
-then passing that into the constructor of :class:`pyuavcan.application.Node`,
-but this is *not recommended*.
 
 
 Application-layer function implementations

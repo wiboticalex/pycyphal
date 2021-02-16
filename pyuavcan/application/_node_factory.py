@@ -5,7 +5,7 @@
 from __future__ import annotations
 import sys
 import itertools
-from typing import Callable, Tuple, Optional, Union, Dict
+from typing import Callable, Tuple, Optional, Union
 from pathlib import Path
 import logging
 import pyuavcan
@@ -94,8 +94,8 @@ def make_node(
     info: NodeInfo,
     register_file: Union[None, str, Path] = None,
     registers: Optional[Mapping[str, Union[register.ValueProxy, register.Value]]] = None,
-    environment_variables: Optional[Dict[str, str]] = None,
     *,
+    ignore_environment_variables: bool = False,
     transport: Optional[pyuavcan.transport.Transport] = None,
     reconfigurable_transport: bool = False,
 ) -> Node:
@@ -146,25 +146,23 @@ def make_node(
     :param register_file:
         Path to the SQLite file containing the register database; or, in other words,
         the configuration file of this application/node.
-        If not provided (default), the registers of this instance will be stored in-memory,
-        meaning that no persistent configuration will be kept anywhere.
+        If not provided (default), the registers of this instance will be stored in-memory (volatile configuration).
         If path is provided but the file does not exist, it will be created automatically.
         See :attr:`Node.registry`, :meth:`Node.create_register`.
 
     :param registers:
-        Additional register values that override existing ones.
-        This is intended for those special cases where the application needs to forcibly overwrite certain registers
-        or to ensure that a particular register is removed (by passing an empty value).
-        This is, essentially, a convenience feature because one could also pass these overrides via
-        ``environment_variables`` (mind the naming differences though).
+        Update the register file with these values before constructing the node.
+        These values override any other source (like existing values in the register file or environment variables).
+        Empty values trigger removal of corresponding registers from the register file.
 
-    :param environment_variables:
-        The register values passed via environment variables will be automatically parsed and for each
-        register the respective entry in the register file will be updated/created.
-        See :func:`register.parse_environment_variables` for additional details.
+    :param ignore_environment_variables:
+        If False (default), the register values passed via environment variables will be automatically parsed
+        and for each register the respective entry in the register file will be updated/created.
+        Empty values trigger removal of corresponding registers from the register file.
+        Note that ``registers`` take precedence over environment variables.
+        The details are specified in :func:`register.parse_environment_variables`.
 
-        If None (default), the variables are taken from :attr:`os.environ`.
-        To disable variable parsing, pass an empty dict here.
+        True can be passed if the application receives its register configuration at launch from some other source.
 
     :param transport:
         If not provided (default), a new transport instance will be initialized based on the available registers using
@@ -193,7 +191,7 @@ def make_node(
 
         While tedious, this is not that much of a problem because the PnP protocol is mostly intended for
         hardware nodes rather than software ones.
-        A typical software node would typically obtain its node-ID from the launcher (like Yakut Orchestrator).
+        A typical software node would normally receive its node-ID at startup (see also Yakut Orchestrator).
     """
     from pyuavcan.transport.redundant import RedundantTransport
 
@@ -215,11 +213,12 @@ def make_node(
 
     try:
         all_registers = itertools.chain(
-            register.parse_environment_variables(environment_variables),
-            (registers or {}).items(),
+            ({} if ignore_environment_variables else register.parse_environment_variables()).items(),
+            (registers or {}).items(),  # Highest precedence comes last.
         )
         for name, value in all_registers:
             value = register.ValueProxy(value).value
+            _logger.debug("Register init: %r <-- %r", name, value)
             if value.empty:  # Remove register under this name.
                 try:
                     del db[name]

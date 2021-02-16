@@ -15,7 +15,7 @@ from . import Real16, Real32, Real64
 _logger = logging.getLogger(__name__)
 
 
-def parse_environment_variables(env: Optional[Dict[str, str]] = None) -> List[Tuple[str, Value]]:
+def parse_environment_variables(env: Optional[Dict[str, str]] = None) -> Dict[str, Value]:
     """
     Given a list of environment variables, generates pairs of (name, :class:`Value`).
     A register name is mapped to the environment variable name as follows:
@@ -41,20 +41,16 @@ def parse_environment_variables(env: Optional[Dict[str, str]] = None) -> List[Tu
     ...     "M__MOTOR__UNIQUE_ID__UNSTRUCTURED": "587ebed4a860984ab78b2095ee07484c",  # Hex-encoded binary blob.
     ...     "LD_PRELOAD":                        "/opt/unrelated.so",       # Unrelated variables are simply ignored.
     ... })
-    >>> len(parsed)
-    3
-    >>> parsed[0]
-    ('m.motor.flux_linkage', uavcan.register.Value...real32=...1.23...4.56...)
-    >>> parsed[1]
-    ('m.motor.vendor_id', uavcan.register.Value...string=...)
-    >>> parsed[2]
-    ('m.motor.unique_id', uavcan.register.Value...unstructured=...)
+    >>> parsed  # doctest: +NORMALIZE_WHITESPACE
+    {'m.motor.flux_linkage': uavcan.register.Value...real32=...[1.23,4.56]...
+     'm.motor.vendor_id':    uavcan.register.Value...string=...'Name: Sirius Cyber Corp.'...
+     'm.motor.unique_id':    uavcan.register.Value...unstructured=...}
 
     :param env: If not provided, defaults to :data:`os.environ`.
     """
     if env is None:
         env = os.environ.copy()
-    return list(_parse(env))
+    return dict(_parse(env))
 
 
 def _parse(env: Dict[str, str]) -> Iterable[Tuple[str, Value]]:
