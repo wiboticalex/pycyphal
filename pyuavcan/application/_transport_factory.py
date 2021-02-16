@@ -3,12 +3,10 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Mapping, Iterator, Type, Optional, TypeVar, Union
+from typing import Mapping, Iterator, Type, Optional, TypeVar, Union, Sequence, Callable
+import itertools
 import pyuavcan
 from .register import ValueProxy, Value
-
-
-_RegisterType = TypeVar("_RegisterType", int, float, bool, str, bytes)
 
 
 def make_transport(
@@ -187,80 +185,18 @@ def make_transport(
     RedundantTransport()
     """
 
-    def get(name: str, ty: Type[_RegisterType]) -> Optional[_RegisterType]:
-        try:
-            return ty(ValueProxy(registers[name]))
-        except KeyError:
-            return None
+    reg = _Adapter(registers)
 
-    node_id = get("uavcan.node.id", int)
+    node_id = reg.cast("uavcan.node.id", int)
     # Per Specification, if uavcan.node.id = 65535, the node-ID is unspecified.
     # TODO: currently, we raise an error if the node-ID setting exceeds the maximum allowed value for the current
     # transport, but the spec recommends that we should handle this as if the node-ID was not set at all.
     if node_id is not None and not (0 <= node_id < 0xFFFF):
         node_id = None
 
-    def udp() -> Iterator[pyuavcan.transport.Transport]:
-        try:
-            ip_list = str(ValueProxy(registers["uavcan.udp.ip"])).split()
-        except KeyError:
-            return
+    transports = list(itertools.chain(*(f(reg, node_id) for f in _SPECIALIZATIONS)))
+    assert all(isinstance(t, pyuavcan.transport.Transport) for t in transports)
 
-        from pyuavcan.transport.udp import UDPTransport
-
-        mtu = get("uavcan.udp.mtu", int) or min(UDPTransport.VALID_MTU_RANGE)
-        srv_mult = int(get("uavcan.udp.duplicate_service_transfers", bool) or False) + 1
-        for ip in ip_list:
-            yield UDPTransport(ip, node_id, mtu=mtu, service_transfer_multiplier=srv_mult)
-
-    def serial() -> Iterator[pyuavcan.transport.Transport]:
-        try:
-            port_list = str(ValueProxy(registers["uavcan.serial.port"])).split()
-        except KeyError:
-            return
-
-        from pyuavcan.transport.serial import SerialTransport
-
-        srv_mult = int(get("uavcan.serial.duplicate_service_transfers", bool) or False) + 1
-        baudrate = get("uavcan.serial.baudrate", int)
-        for port in port_list:
-            yield SerialTransport(str(port), node_id, service_transfer_multiplier=srv_mult, baudrate=baudrate)
-
-    def can() -> Iterator[pyuavcan.transport.Transport]:
-        try:
-            iface_list = str(ValueProxy(registers["uavcan.can.iface"])).split()
-        except KeyError:
-            return
-
-        from pyuavcan.transport.can import CANTransport
-
-        mtu = get("uavcan.can.mtu", int)
-        try:
-            br_arb, br_data = ValueProxy(registers["uavcan.can.bitrate"]).ints
-        except (KeyError, ValueError):
-            br_arb = 1_000_000
-            br_data = br_arb * (4 if mtu is None or mtu > 8 else 1)
-
-        for iface in iface_list:
-            media: pyuavcan.transport.can.media.Media
-            if iface.lower().startswith("socketcan:"):
-                from pyuavcan.transport.can.media.socketcan import SocketCANMedia
-
-                mtu = mtu or (8 if br_arb == br_data else 64)
-                media = SocketCANMedia(iface.split(":")[-1], mtu=mtu)
-            else:
-                from pyuavcan.transport.can.media.pythoncan import PythonCANMedia
-
-                media = PythonCANMedia(iface, br_arb if br_arb == br_data else (br_arb, br_data), mtu)
-            yield CANTransport(media, node_id)
-
-    def loopback() -> Iterator[pyuavcan.transport.Transport]:
-        if get("uavcan.loopback", bool):
-            from pyuavcan.transport.loopback import LoopbackTransport
-
-            yield LoopbackTransport(node_id)
-
-    transports = *udp(), *serial(), *can(), *loopback()
     if not reconfigurable:
         if not transports:
             return None
@@ -273,3 +209,95 @@ def make_transport(
     for tr in transports:
         red.attach_inferior(tr)
     return red
+
+
+class _Adapter(Mapping[str, ValueProxy]):
+    _RegisterType = TypeVar("_RegisterType", int, float, bool, str, bytes)
+
+    def __init__(self, inner: Mapping[str, Union[ValueProxy, Value]]) -> None:
+        self._inner = inner
+
+    def cast(self, name: str, ty: Type[_RegisterType]) -> Optional[_RegisterType]:
+        try:
+            return ty(self[name])
+        except KeyError:
+            return None
+
+    def __getitem__(self, key: str) -> ValueProxy:
+        return ValueProxy(self._inner[key])
+
+    def __iter__(self) -> Iterator[str]:
+        return self._inner.__iter__()
+
+    def __len__(self) -> int:
+        return len(self._inner)
+
+
+def _make_udp(reg: _Adapter, node_id: Optional[int]) -> Iterator[pyuavcan.transport.Transport]:
+    try:
+        ip_list = str(ValueProxy(reg["uavcan.udp.ip"])).split()
+    except KeyError:
+        return
+
+    from pyuavcan.transport.udp import UDPTransport
+
+    mtu = reg.cast("uavcan.udp.mtu", int) or min(UDPTransport.VALID_MTU_RANGE)
+    srv_mult = int(reg.cast("uavcan.udp.duplicate_service_transfers", bool) or False) + 1
+    for ip in ip_list:
+        yield UDPTransport(ip, node_id, mtu=mtu, service_transfer_multiplier=srv_mult)
+
+
+def _make_serial(reg: _Adapter, node_id: Optional[int]) -> Iterator[pyuavcan.transport.Transport]:
+    try:
+        port_list = str(ValueProxy(reg["uavcan.serial.port"])).split()
+    except KeyError:
+        return
+
+    from pyuavcan.transport.serial import SerialTransport
+
+    srv_mult = int(reg.cast("uavcan.serial.duplicate_service_transfers", bool) or False) + 1
+    baudrate = reg.cast("uavcan.serial.baudrate", int)
+    for port in port_list:
+        yield SerialTransport(str(port), node_id, service_transfer_multiplier=srv_mult, baudrate=baudrate)
+
+
+def _make_can(reg: _Adapter, node_id: Optional[int]) -> Iterator[pyuavcan.transport.Transport]:
+    try:
+        iface_list = str(ValueProxy(reg["uavcan.can.iface"])).split()
+    except KeyError:
+        return
+
+    from pyuavcan.transport.can import CANTransport
+
+    mtu = reg.cast("uavcan.can.mtu", int)
+    try:
+        br_arb, br_data = ValueProxy(reg["uavcan.can.bitrate"]).ints
+    except (KeyError, ValueError):
+        br_arb = 1_000_000
+        br_data = br_arb * (4 if mtu is None or mtu > 8 else 1)
+
+    for iface in iface_list:
+        media: pyuavcan.transport.can.media.Media
+        if iface.lower().startswith("socketcan:"):
+            from pyuavcan.transport.can.media.socketcan import SocketCANMedia
+
+            mtu = mtu or (8 if br_arb == br_data else 64)
+            media = SocketCANMedia(iface.split(":")[-1], mtu=mtu)
+        else:
+            from pyuavcan.transport.can.media.pythoncan import PythonCANMedia
+
+            media = PythonCANMedia(iface, br_arb if br_arb == br_data else (br_arb, br_data), mtu)
+        yield CANTransport(media, node_id)
+
+
+def _make_loopback(reg: _Adapter, node_id: Optional[int]) -> Iterator[pyuavcan.transport.Transport]:
+    if reg.cast("uavcan.loopback", bool):
+        from pyuavcan.transport.loopback import LoopbackTransport
+
+        yield LoopbackTransport(node_id)
+
+
+_SPECIALIZATIONS: Sequence[Callable[[_Adapter, Optional[int]], Iterator[pyuavcan.transport.Transport]]] = [
+    v for k, v in globals().items() if callable(v) and k.startswith("_make_")
+]
+assert len(_SPECIALIZATIONS) >= 4
