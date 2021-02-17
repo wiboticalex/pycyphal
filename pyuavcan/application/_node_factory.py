@@ -93,7 +93,7 @@ class DefaultNode(Node):
 def make_node(
     info: NodeInfo,
     register_file: Union[None, str, Path] = None,
-    registers: Optional[Mapping[str, Union[register.ValueProxy, register.Value]]] = None,
+    defaults: Optional[Mapping[str, Union[register.ValueProxy, register.Value]]] = None,
     *,
     ignore_environment_variables: bool = False,
     transport: Optional[pyuavcan.transport.Transport] = None,
@@ -150,17 +150,19 @@ def make_node(
         If path is provided but the file does not exist, it will be created automatically.
         See :attr:`Node.registry`, :meth:`Node.create_register`.
 
-    :param registers:
-        Update the register file with these values before constructing the node.
-        These values override any other source (like existing values in the register file or environment variables).
+    :param defaults:
+        These are the default register values.
+        After the environment variables are parsed (unless disabled) and the register file is updated accordingly,
+        these values will be checked to make sure that every register specified here exists in the register file.
+        Existing registers will be kept as-is, whereas missing ones will be created with the specified default value.
         Empty values trigger removal of corresponding registers from the register file.
+        Do not use this feature for setting default node-ID or port-IDs.
 
     :param ignore_environment_variables:
         If False (default), the register values passed via environment variables will be automatically parsed
         and for each register the respective entry in the register file will be updated/created.
-        Empty values trigger removal of corresponding registers from the register file.
-        Note that ``registers`` take precedence over environment variables.
         The details are specified in :func:`register.parse_environment_variables`.
+        Empty values trigger removal of corresponding registers from the register file.
 
         True can be passed if the application receives its register configuration at launch from some other source.
 
@@ -212,20 +214,10 @@ def make_node(
         return transport
 
     try:
-        all_registers = itertools.chain(
-            ({} if ignore_environment_variables else register.parse_environment_variables()).items(),
-            (registers or {}).items(),  # Highest precedence comes last.
-        )
-        for name, value in all_registers:
-            value = register.ValueProxy(value).value
-            _logger.debug("Register init: %r <-- %r", name, value)
-            if value.empty:  # Remove register under this name.
-                try:
-                    del db[name]
-                except LookupError:
-                    pass
-            else:
-                db[name] = value
+        if not ignore_environment_variables:
+            _apply_env_vars(db)
+        if defaults is not None:
+            _apply_defaults(db, defaults)
 
         presentation = pyuavcan.presentation.Presentation(init_transport())
         node = DefaultNode(
@@ -241,6 +233,33 @@ def make_node(
         db.close()  # We do not close the database at normal exit because it's handed over to the node.
         raise
     return node
+
+
+def _apply_env_vars(db: SQLiteBackend) -> None:
+    for name, value in register.parse_environment_variables().items():
+        value = register.ValueProxy(value).value
+        _logger.debug("Register init from env var: %r <-- %r", name, value)
+        if value.empty:  # Remove register under this name.
+            try:
+                del db[name]
+            except LookupError:
+                pass
+        else:
+            db[name] = value
+
+
+def _apply_defaults(db: SQLiteBackend, defaults: Mapping[str, Union[register.ValueProxy, register.Value]]) -> None:
+    for name, value in defaults.items():
+        value = register.ValueProxy(value).value
+        if value.empty:  # Remove register under this name.
+            try:
+                del db[name]
+            except LookupError:
+                pass
+        else:
+            existing = db.get(name)
+            if existing is None or existing.value.empty:
+                db[name] = value
 
 
 def _make_diagnostic_publisher(node: Node) -> None:

@@ -234,8 +234,10 @@ There are three places:
 
   When the environment variables are parsed, the values stored in the register file are automatically updated.
 
-- **Explicit registers.**
-  The application can pass registers explicitly to override all of the above and update the register file accordingly.
+- **Default registers.**
+  The application can pass default register values to ensure that specific registers are created even if they are not
+  passed via environment variables and are not already present in the register file.
+  Do not use this feature for setting default node-ID or port-IDs.
 
 ..  doctest::
     :hide:
@@ -256,7 +258,13 @@ UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16    6543
 UAVCAN__UDP__IP__STRING                         127.63.0.0
 UAVCAN__SERIAL__PORT__STRING                    socket://localhost:50905
 M__MOTOR__INDUCTANCE_DQ__REAL64                 0.12 0.13
->>> node = pyuavcan.application.make_node(node_info, "registers.db")   # The file will be created if doesn't exist.
+>>> node = pyuavcan.application.make_node(
+...     node_info,
+...     "registers.db",     # The file will be created if doesn't exist.
+...     defaults={          # Configure default logging severity.
+...         "uavcan.diagnostic.severity": Value(natural16=pyuavcan.application.register.Natural16([2])),
+...     },
+... )
 >>> node.id
 42
 >>> node.presentation.transport     # Heterogeneously redundant transport: UDP+Serial, as specified in env vars.
