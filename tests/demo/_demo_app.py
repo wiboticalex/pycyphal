@@ -176,6 +176,7 @@ async def _unittest_slow_demo_app(
         assert info.protocol_version.minor == pyuavcan.UAVCAN_SPECIFICATION_VERSION[1]
         assert info.software_version.major == 1
         assert info.software_version.minor == 0
+        del info_transfer
 
         # Test the linear regression service.
         solution_transfer = await cln_least_squares.call(
@@ -186,7 +187,7 @@ async def _unittest_slow_demo_app(
                 ]
             )
         )
-        print("LINEAR REGRESSION RESPONSE:", info_transfer)
+        print("LINEAR REGRESSION RESPONSE:", solution_transfer)
         assert solution_transfer
         solution, transfer = solution_transfer
         assert transfer.source_node_id == DEMO_APP_NODE_ID
@@ -197,12 +198,13 @@ async def _unittest_slow_demo_app(
         assert solution.y_intercept == pytest.approx(0.0)
 
         solution_transfer = await cln_least_squares.call(sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Request())
-        print("LINEAR REGRESSION RESPONSE:", info_transfer)
+        print("LINEAR REGRESSION RESPONSE:", solution_transfer)
         assert solution_transfer
         solution, _ = solution_transfer
         assert isinstance(solution, sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0.Response)
         assert not math.isfinite(solution.slope)
         assert not math.isfinite(solution.y_intercept)
+        del solution_transfer
 
         # Validate the thermostat.
         for _ in range(2):
@@ -245,7 +247,7 @@ async def _unittest_slow_demo_app(
                 command=uavcan.node.ExecuteCommand_1_1.Request.COMMAND_STORE_PERSISTENT_STATES
             )
         )
-        print("BAD COMMAND RESPONSE:", info_transfer)
+        print("BAD COMMAND RESPONSE:", result_transfer)
         assert result_transfer
         result, transfer = result_transfer
         assert transfer.source_node_id == DEMO_APP_NODE_ID
@@ -258,7 +260,7 @@ async def _unittest_slow_demo_app(
         result_transfer = await cln_command.call(
             uavcan.node.ExecuteCommand_1_1.Request(command=uavcan.node.ExecuteCommand_1_1.Request.COMMAND_FACTORY_RESET)
         )
-        print("FACTORY RESET COMMAND RESPONSE:", info_transfer)
+        print("FACTORY RESET COMMAND RESPONSE:", result_transfer)
         assert result_transfer
         result, transfer = result_transfer
         assert transfer.source_node_id == DEMO_APP_NODE_ID
@@ -266,6 +268,7 @@ async def _unittest_slow_demo_app(
         assert transfer.priority == pyuavcan.transport.Priority.NOMINAL
         assert isinstance(result, uavcan.node.ExecuteCommand_1_1.Response)
         assert result.status == result.STATUS_SUCCESS
+        del result_transfer
 
         # Validate the heartbeats (all of them).
         prev_hb_transfer = first_hb_transfer
@@ -281,7 +284,7 @@ async def _unittest_slow_demo_app(
             assert hb.health.value == hb.health.NOMINAL
             assert hb.mode.value == hb.mode.OPERATIONAL
             assert num_heartbeats <= hb.uptime <= 300
-            assert hb.uptime == prev_hb_transfer[0].uptime + 1
+            assert prev_hb_transfer[0].uptime <= hb.uptime <= prev_hb_transfer[0].uptime + 1
             assert transfer.transfer_id == prev_hb_transfer[1].transfer_id + 1
             prev_hb_transfer = hb_transfer
             num_heartbeats += 1
