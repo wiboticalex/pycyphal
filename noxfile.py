@@ -162,7 +162,7 @@ def demo(session):
     for s in demo_dir.iterdir():
         if s.name.startswith("."):
             continue
-        session.log("Copy:", s)
+        session.log("Copy: %s", s)
         if s.is_dir():
             shutil.copytree(s, tmp_dir / s.name, dirs_exist_ok=True)
         else:

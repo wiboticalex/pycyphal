@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 import sys
-import itertools
 from typing import Callable, Tuple, Optional, Union
 from pathlib import Path
 import logging
