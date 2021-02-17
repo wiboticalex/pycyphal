@@ -168,9 +168,8 @@ def demo(session):
         else:
             shutil.copy(s, tmp_dir)
 
-    args = "yakut", "orc", str(demo_dir / "launch.orc.yaml")
     session.env["STOP_AFTER"] = "90"
-    session.run(*args, success_codes=[111])
+    session.run("yakut", "orc", "launch.orc.yaml", success_codes=[111])
 
 
 @nox.session(python=PYTHONS)
