@@ -263,4 +263,62 @@ And the diagnostic subscriber we started in the beginning should print a log rec
 Orchestration
 -------------
 
-TODO
+..  important::
+
+    Yakut Orchestrator is in an alpha preview stage.
+    Breaking changes may be introduced between minor versions until Yakut v1.0 is released.
+
+    Yakut Orchestrator does not support Windows currently.
+
+Manual management of environment variables and node processes may work in simple setups, but it doesn't really scale.
+Practical cyber-physical systems require a better way of managing UAVCAN networks that may simultaneously include
+software nodes executed on the local or remote computers along with specialized bare-metal nodes running on
+dedicated hardware.
+
+One solution to this is Yakut Orchestrator --- an interpreter of a simple YAML-based domain-specific language
+that allows one to define process groups and manage them atomically.
+The language has first-class support for registers --- instead of relying on environment variables,
+one can define registers using a human-friendly syntax without the need to explicitly specify their types
+(the tool will deduce the correct types automatically).
+
+Here's an example orchestration file (orc-file) ``launch.orc.yaml``:
+
+.. literalinclude:: /../demo/launch.orc.yaml
+   :linenos:
+   :language: yaml
+
+Those familiar with ROS may find it somewhat similar to *roslaunch*.
+
+The orc-file can be executed as ``yakut orc launch.orc.yaml``, or simply ``./launch.orc.yaml``
+(use ``--verbose`` to see which environment variables are passed to each launched process).
+Having started it, execute the setpoint & measurement publication command introduced earlier,
+and you should see the following output appear in the terminal:
+
+..  code-block:: yaml
+
+    ---
+    8184:
+      _metadata_:
+        timestamp:
+          system: 1613597110.155263
+          monotonic: 1149486.479633
+        priority: optional
+        transfer_id: 0
+        source_node_id: 42
+      timestamp:
+        microsecond: 1613597110154721
+      severity:
+        value: 2
+      text: 'root: Application started with PID gains: 0.100 0.000 0.000'
+
+    ---
+    2347:
+      volt: 1.1999999284744263
+
+    ---
+    2347:
+      volt: 1.1999999284744263
+
+    # And so on...
+
+For more info about this tool refer to the Yakut documentation.

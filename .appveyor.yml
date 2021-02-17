@@ -73,7 +73,7 @@ for:
       # Sonar scanner unconditionally fails on PR builds with a NullPointerException, so don't run it there.
       - '[[ -z "$APPVEYOR_PULL_REQUEST_HEAD_COMMIT" ]] || unset SONARCLOUD_TOKEN'
     test_script:
-      - 'nox --non-interactive --error-on-missing-interpreters --session test pristine --python $PYTHON'
+      - 'nox --non-interactive --error-on-missing-interpreters --session test demo pristine --python $PYTHON'
       - 'nox --non-interactive --error-on-missing-interpreters --session check_style docs'
 
   - # DEPLOYMENT

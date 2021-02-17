@@ -168,9 +168,8 @@ class DemoApplication:
 
     def close(self) -> None:
         """
-        This will close all the underlying resources down to the transport interface.
+        This will close all the underlying resources down to the transport interface and all publishers/servers/etc.
         All pending tasks such as serve_in_background()/receive_in_background() will notice this and exit automatically.
-        This is convenient as it relieves the application from having to keep track of all port instances.
         """
         self._node.close()
 

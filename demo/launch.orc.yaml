@@ -1,0 +1,48 @@
+#!/usr/bin/env -S yakut --verbose orchestrate
+# Read the docs: yakut orchestrate --help
+
+# Shared environment variables for all nodes/processes
+YAKUT_TRANSPORT:      UDP('127.9.0.111')
+YAKUT_COMPILE_OUTPUT: .yakut_compiled
+YAKUT_PATH:           .yakut_compiled
+
+# Shared registers for all nodes/processes (can be overridden in local scopes)
+uavcan:
+  udp.ip: 127.9.0.0
+  diagnostic.severity: 2
+  diagnostic.timestamp: true
+  sub:
+    temperature_setpoint.id:    2345
+    temperature_measurement.id: 2346
+  pub:
+    heater_voltage.id: 2347
+  srv:
+    least_squares.id: 123
+
+# Keys with "=" define imperatives rather than registers or environment variables.
+main=:
+- ?=: '[ ! -d $YAKUT_COMPILE_OUTPUT ]'  # If the output directory does not exist, run the Yakut DSDL compiler.
+  main=:                                # All script statements run concurrently.
+  - echo "Compiling DSDL for Yakut, this may take a while"
+  - yakut compile custom_data_types/sirius_cyber_corp public_regulated_data_types/uavcan
+
+- # An empty statement is a join statement -- here we wait for the previously launched processes to exit.
+
+- yakut sub uavcan.diagnostic.Record.1.1
+
+- main=:              # Run the application and print subject "heater_voltage"
+  - |                 # Wait a few seconds to let the diagnostic subscriber get ready.
+    sleep 2
+    ./demo_app.py
+  - yakut sub -M ${UAVCAN__PUB__HEATER_VOLTAGE__ID__NATURAL16}.uavcan.si.unit.voltage.Scalar.1.0
+  # Exit automatically if STOP_AFTER is defined
+  - ?=: test -n "$STOP_AFTER"
+    main=: sleep $STOP_AFTER && exit 111
+  # Registers for this composition specifically (not visible outside of this block)
+  uavcan:
+    node.id: 42
+  thermostat:
+    pid.gains: [0.1, 0, 0]
+
+finally=:             # The finalizer is always executed at the end even if the main script has failed.
+- rm -rf *.db

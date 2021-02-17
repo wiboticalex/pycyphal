@@ -100,7 +100,7 @@ class DiagnosticPublisher(logging.Handler):
     >>> logging.info('Test message')
     >>> msg, _ = get_event_loop().run_until_complete(sub.receive_for(1.0))
     >>> msg.text.tobytes().decode()
-    'Test message'
+    'root: Test message'
     >>> msg.severity.value == Severity.INFO     # The log level is mapped automatically.
     True
 
@@ -122,7 +122,7 @@ class DiagnosticPublisher(logging.Handler):
     >>> logging.info('Test message')
     >>> msg, _ = get_event_loop().run_until_complete(sub.receive_for(1.0))
     >>> msg.text.tobytes().decode()
-    'Test message'
+    'root: Test message'
     >>> msg.severity.value == Severity.INFO
     True
     >>> node.close()
@@ -130,6 +130,9 @@ class DiagnosticPublisher(logging.Handler):
 
     def __init__(self, node: pyuavcan.application.Node, level: int = logging.WARNING) -> None:
         self._pub = node.make_publisher(Record)
+        self._pub.priority = pyuavcan.transport.Priority.OPTIONAL
+        self._pub.send_timeout = 10.0
+
         self._fut: Optional[asyncio.Future[None]] = None
         self._forward_timestamp = False
         self._started = False
@@ -200,7 +203,8 @@ class DiagnosticPublisher(logging.Handler):
         #   Fit[data, {1, x}, {{0, 0}, {10, 1}, {20, 2}, {30, 4}, {40, 5}, {50, 6}}]
         sev = min(7, round(-0.14285714285714374 + 0.12571428571428572 * record.levelno))
 
-        text = record.getMessage()[:255]  # TODO: this is crude; expose array lengths from DSDL.
+        text = f"{record.name}: {record.getMessage()}"
+        text = text[:255]  # TODO: this is crude; expose array lengths from DSDL.
         return Record(timestamp=ts, severity=Severity(sev), text=text)
 
     def __repr__(self) -> str:

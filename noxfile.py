@@ -1,6 +1,7 @@
 # Copyright (c) 2020 UAVCAN Consortium
 # This software is distributed under the terms of the MIT License.
 # Author: Pavel Kirienko <pavel@uavcan.org>
+# type: ignore
 
 import os
 import sys
@@ -139,6 +140,37 @@ def test(session):
         session.run("sonar-scanner", f"-Dsonar.login={sonarcloud_token}", external=True)
     else:
         session.log("SonarQube scan skipped")
+
+
+@nox.session()
+def demo(session):
+    """
+    Test the demo app orchestration example.
+    This is a separate session because it is dependent on Yakut.
+    """
+    if sys.platform.startswith("win"):
+        session.log("This session cannot be run on Windows")
+        return 0
+
+    session.install("-e", f".[{','.join(EXTRAS_REQUIRE.keys())}]")
+    session.install("git+https://github.com/UAVCAN/yakut@orchestration")
+
+    demo_dir = ROOT_DIR / "demo"
+    tmp_dir = Path(session.create_tmp()).resolve()
+    session.cd(tmp_dir)
+
+    for s in demo_dir.iterdir():
+        if s.name.startswith("."):
+            continue
+        session.log("Copy:", s)
+        if s.is_dir():
+            shutil.copytree(s, tmp_dir / s.name, dirs_exist_ok=True)
+        else:
+            shutil.copy(s, tmp_dir)
+
+    args = "yakut", "orc", str(demo_dir / "launch.orc.yaml")
+    session.env["STOP_AFTER"] = "90"
+    session.run(*args, success_codes=[111])
 
 
 @nox.session(python=PYTHONS)
