@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-# This is a setup.py demo that shows how to distribute compiled DSDL definitions with Python packages.
-# This is better than checking in generated code under version control (seriously, don't do this).
+# This is a simplified setup.py demo that shows how to distribute compiled DSDL definitions with Python packages.
 # Distributed under CC0 1.0 Universal (CC0 1.0) Public Domain Dedication.
 # type: ignore
 
@@ -11,20 +10,20 @@ from pathlib import Path
 
 NAME = "demo_app"
 
-DSDL_NAMESPACE_DIRS = [  # DSDL namespace directories that are to be compiled and distributed with the app.
-    "public_regulated_data_types/uavcan",  # All UAVCAN applications without exception need the standard namespace.
-    "custom_data_types/sirius_cyber_corp",
-    # "public_regulated_data_types/reg",  # Many applications need the non-standard regulated namespace as well.
-]
-
 
 # noinspection PyUnresolvedReferences
 class BuildPy(distutils.command.build_py.build_py):
     def run(self):
-        if not self.dry_run:
-            import pyuavcan
+        import pyuavcan
 
-            pyuavcan.dsdl.compile_all(DSDL_NAMESPACE_DIRS, Path(self.build_lib, NAME, ".demo_dsdl_compiled"))
+        pyuavcan.dsdl.compile_all(
+            [
+                "public_regulated_data_types/uavcan",  # All UAVCAN applications need the standard namespace, always.
+                "custom_data_types/sirius_cyber_corp",
+                # "public_regulated_data_types/reg",  # Many applications also need the non-standard regulated DSDL.
+            ],
+            output_directory=Path(self.build_lib, NAME, ".demo_dsdl_compiled"),  # Store in the build output archive.
+        )
         super().run()
 
 
