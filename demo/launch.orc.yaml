@@ -26,16 +26,16 @@ main=:
   - echo "Compiling DSDL for Yakut, this may take a while"
   - yakut compile custom_data_types/sirius_cyber_corp public_regulated_data_types/uavcan
 
-- # An empty statement is a join statement -- here we wait for the previously launched processes to exit.
+- # An empty statement is a join statement -- wait for the previously launched processes to exit before continuing.
 
-- yakut sub uavcan.diagnostic.Record.1.1
+- yakut sub uavcan.diagnostic.Record.1.1  # Print diagnostic messages in the terminal that runs the orchestrator.
 
 - main=:              # Run the application and print subject "heater_voltage"
   - |                 # Wait a few seconds to let the diagnostic subscriber get ready.
     sleep 2
     ./demo_app.py
   - yakut sub -M ${UAVCAN__PUB__HEATER_VOLTAGE__ID__NATURAL16}.uavcan.si.unit.voltage.Scalar.1.0
-  # Exit automatically if STOP_AFTER is defined
+  # Exit automatically if STOP_AFTER is defined (frankly this is just to simplify automatic testing)
   - ?=: test -n "$STOP_AFTER"
     main=: sleep $STOP_AFTER && exit 111
   # Registers for this composition specifically (not visible outside of this block)
@@ -43,6 +43,3 @@ main=:
     node.id: 42
   thermostat:
     pid.gains: [0.1, 0, 0]
-
-finally=:             # The finalizer is always executed at the end even if the main script has failed.
-- rm -rf *.db

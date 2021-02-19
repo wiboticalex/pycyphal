@@ -25,19 +25,21 @@ class _State:
 
 
 class PortListPublisher:
+    """
+    This class is to be automatically instantiated by :class:`pyuavcan.application.Node`.
+    Publishing will be suspended while the local node-ID is anonymous.
+    The status is updated every second, publications happen every MAX_PUBLICATION_PERIOD seconds or on change.
+    """
+
     _UPDATE_PERIOD = 1.0
     _MAX_UPDATES_BETWEEN_PUBLICATIONS = int(List.MAX_PUBLICATION_PERIOD / _UPDATE_PERIOD)
 
     def __init__(self, node: pyuavcan.application.Node) -> None:
         self._node = node
-
-        self._pub_list = self.node.make_publisher(List)
-        self._pub_list.priority = pyuavcan.transport.Priority.OPTIONAL
-
-        self._next_update_at = 0.0
+        self._pub: Optional[pyuavcan.presentation.Publisher[List]] = None
         self._updates_since_pub = 0
+        self._next_update_at = 0.0
         self._timer: Optional[asyncio.TimerHandle] = None
-
         self._state = _State(set(), set(), set(), set())
 
         def start() -> None:
@@ -45,7 +47,8 @@ class PortListPublisher:
             self._timer = self.node.loop.call_at(self._next_update_at, self._update)
 
         def close() -> None:
-            self._pub_list.close()
+            if self._pub is not None:
+                self._pub.close()
             if self._timer is not None:
                 self._timer.cancel()
                 self._timer = None
@@ -56,9 +59,27 @@ class PortListPublisher:
     def node(self) -> pyuavcan.application.Node:
         return self._node
 
+    def _get_publisher(self) -> Optional[pyuavcan.presentation.Publisher[List]]:
+        if self._pub is None:
+            try:
+                self._pub = self.node.make_publisher(List)
+                self._pub.priority = pyuavcan.transport.Priority.OPTIONAL
+            except Exception as ex:  # pragma: no cover
+                _logger.exception("%r: Could not initialize the publisher: %s", self, ex)
+            else:
+                _logger.debug("%r: Publisher initialized: %r", self, self._pub)
+        return self._pub
+
     def _update(self) -> None:
+        self._updates_since_pub += 1
         self._next_update_at += PortListPublisher._UPDATE_PERIOD
         self._timer = self.node.loop.call_at(self._next_update_at, self._update)
+
+        if self.node.id is None:
+            return
+        publisher = self._get_publisher()
+        if publisher is None:
+            return
 
         input_ds = [x.specifier.data_specifier for x in self.node.presentation.transport.input_sessions]
         srv_in_ds = [x for x in input_ds if isinstance(x, ServiceDataSpecifier)]
@@ -73,14 +94,13 @@ class PortListPublisher:
             srv={x.service_id for x in srv_in_ds if x.role == ServiceDataSpecifier.Role.REQUEST},
         )
 
-        self._updates_since_pub += 1
         state_changed = state != self._state
         time_expired = self._updates_since_pub >= PortListPublisher._MAX_UPDATES_BETWEEN_PUBLICATIONS
         if state_changed or time_expired:
             _logger.debug("%r: Publishing: state_changed=%r, state=%r", self, state_changed, state)
             self._state = state
             self._updates_since_pub = 0
-            self._pub_list.publish_soon(_make_port_list(self._state))
+            publisher.publish_soon(_make_port_list(self._state))  # Should we handle ResourceClosedError here?
 
     def __repr__(self) -> str:
         return pyuavcan.util.repr_attributes(self, self.node)
@@ -98,28 +118,28 @@ def _make_port_list(state: _State) -> List:
     )
 
 
-def _make_subject_id_list(input: Set[int]) -> SubjectIDList:
+def _make_subject_id_list(ports: Set[int]) -> SubjectIDList:
     sparse_list_type = pyuavcan.dsdl.get_model(SubjectIDList)["sparse_list"].data_type
     assert isinstance(sparse_list_type, pydsdl.ArrayType)
 
-    if len(input) <= sparse_list_type.capacity:
-        return SubjectIDList(sparse_list=[SubjectID(x) for x in sorted(input)])
+    if len(ports) <= sparse_list_type.capacity:
+        return SubjectIDList(sparse_list=[SubjectID(x) for x in sorted(ports)])
 
     out = SubjectIDList()
     assert out.mask is not None
-    _populate_mask(input, out.mask)
+    _populate_mask(ports, out.mask)
     return out
 
 
-def _make_service_id_list(input: Set[int]) -> ServiceIDList:
+def _make_service_id_list(ports: Set[int]) -> ServiceIDList:
     out = ServiceIDList()
-    _populate_mask(input, out.mask)
+    _populate_mask(ports, out.mask)
     return out
 
 
-def _populate_mask(input: Set[int], output: Any) -> None:
-    for idx in range(len(output)):
-        output[idx] = idx in input
+def _populate_mask(ports: Set[int], output: Any) -> None:
+    for idx in range(len(output)):  # pylint: disable=consider-using-enumerate
+        output[idx] = idx in ports
 
 
 def _unittest_make_port_list() -> None:
