@@ -7,7 +7,6 @@ from typing import Union, Callable, Tuple, Type, TypeVar, Optional, List, Any
 import abc
 import asyncio
 import logging
-import contextlib
 import uavcan.node
 import pyuavcan
 from pyuavcan.presentation import Presentation, ServiceRequestMetadata, Publisher, Subscriber, Server, Client
@@ -21,7 +20,7 @@ MessageClass = TypeVar("MessageClass", bound=pyuavcan.dsdl.CompositeObject)
 ServiceClass = TypeVar("ServiceClass", bound=pyuavcan.dsdl.ServiceObject)
 
 
-class Node(contextlib.AbstractContextManager["Node"]):
+class Node(abc.ABC):
     """
     This is the top-level abstraction representing a UAVCAN node on the bus.
     This is an abstract class; instantiate it using the factory :func:`pyuavcan.application.make_node`

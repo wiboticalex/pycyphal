@@ -5,6 +5,7 @@
 import os
 import sys
 import math
+import time
 import shutil
 from typing import Iterable, Dict, Iterator, Tuple, List
 import asyncio
@@ -43,12 +44,32 @@ class RunConfig:
 
 
 def _get_run_configs() -> Iterable[RunConfig]:
-    yield RunConfig({"UAVCAN__UDP__IP__STRING": "127.0.0.0"})
-    yield RunConfig({"UAVCAN__SERIAL__PORT__STRING": "socket://localhost:50905"})
+    """
+    Notice how we add EMPTY for unused transports --- this is to remove unused transport configs.
+    Removal is necessary because we are going to switch the transport! If we keep the old config registers around,
+    the old transport configuration from it may conflict with the new transport settings.
+    For example, if we use CAN but the previous one was UDP, it would fail with a transfer-ID monotonicity error.
+    """
+
     yield RunConfig(
         {
-            "UAVCAN__UDP__IP__STRING": "127.0.0.0",
+            "UAVCAN__UDP__IP__STRING": "127.9.0.0",
+            "UAVCAN__SERIAL__PORT__EMPTY": "",
+            "UAVCAN__CAN__IFACE__EMPTY": "",
+        }
+    )
+    yield RunConfig(
+        {
             "UAVCAN__SERIAL__PORT__STRING": "socket://localhost:50905",
+            "UAVCAN__UDP__IP__EMPTY": "",
+            "UAVCAN__CAN__IFACE__EMPTY": "",
+        }
+    )
+    yield RunConfig(
+        {
+            "UAVCAN__UDP__IP__STRING": "127.9.0.0",
+            "UAVCAN__SERIAL__PORT__STRING": "socket://localhost:50905",
+            "UAVCAN__CAN__IFACE__EMPTY": "",
         }
     )
     if sys.platform.startswith("linux"):
@@ -56,12 +77,16 @@ def _get_run_configs() -> Iterable[RunConfig]:
             {
                 "UAVCAN__CAN__IFACE__STRING": "socketcan:vcan0",
                 "UAVCAN__CAN__MTU__NATURAL16": "8",
+                "UAVCAN__SERIAL__PORT__EMPTY": "",
+                "UAVCAN__UDP__IP__EMPTY": "",
             }
         )
         yield RunConfig(
             {
                 "UAVCAN__CAN__IFACE__STRING": " ".join(f"socketcan:vcan{i}" for i in range(3)),
                 "UAVCAN__CAN__MTU__NATURAL16": "64",
+                "UAVCAN__SERIAL__PORT__EMPTY": "",
+                "UAVCAN__UDP__IP__EMPTY": "",
             }
         )
 
@@ -122,7 +147,6 @@ async def _unittest_slow_demo_app(
 
     try:
         local_node_info = uavcan.node.GetInfo_1_0.Response(
-            protocol_version=uavcan.node.Version_1_0(*pyuavcan.UAVCAN_SPECIFICATION_VERSION),
             software_version=uavcan.node.Version_1_0(*pyuavcan.__version_info__[:2]),
             name="org.uavcan.pyuavcan.test.demo_app",
         )
@@ -294,4 +318,154 @@ async def _unittest_slow_demo_app(
     finally:
         node.close()
         demo_proc.kill()
+        await asyncio.sleep(2.0)  # Let coroutines terminate properly to avoid resource usage warnings.
+
+
+@pytest.mark.parametrize("run_config", _get_run_configs())  # type: ignore
+@pytest.mark.asyncio  # type: ignore
+async def _unittest_slow_demo_app_with_plant(
+    compiled: Iterator[List[pyuavcan.dsdl.GeneratedPackageInfo]],
+    run_config: RunConfig,
+) -> None:
+    import uavcan.node
+    import uavcan.si.sample.temperature
+    import uavcan.si.unit.temperature
+    import uavcan.si.unit.voltage
+    import pyuavcan.application  # pylint: disable=redefined-outer-name
+
+    asyncio.get_running_loop().slow_callback_duration = 3.0
+    _ = compiled
+
+    env = run_config.env.copy()
+    env.update(
+        {
+            # Other registers beyond the transport settings:
+            "UAVCAN__NODE__ID__NATURAL16": str(DEMO_APP_NODE_ID),
+            "UAVCAN__SUB__TEMPERATURE_SETPOINT__ID__NATURAL16": "2345",
+            "UAVCAN__SUB__TEMPERATURE_MEASUREMENT__ID__NATURAL16": "2346",
+            "UAVCAN__PUB__HEATER_VOLTAGE__ID__NATURAL16": "2347",
+            "UAVCAN__SRV__LEAST_SQUARES__ID__NATURAL16": "123",
+            "THERMOSTAT__PID__GAINS__REAL32": "0.1 0.0 0.0",  # Gain 0.1
+            # Various low-level items:
+            "PYUAVCAN_LOGLEVEL": "INFO",
+            "PATH": os.environ.get("PATH", ""),
+            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),  # https://github.com/appveyor/ci/issues/1995
+            "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+        }
+    )
+    demo_proc = BackgroundChildProcess(
+        "python",
+        "-m",
+        "coverage",
+        "run",
+        str(DEMO_DIR / "demo_app.py"),
+        environment_variables=env,
+    )
+    assert demo_proc.alive
+    print("DEMO APP STARTED WITH PID", demo_proc.pid, "FROM", Path.cwd())
+
+    env["UAVCAN__NODE__ID__NATURAL16"] = str(DEMO_APP_NODE_ID + 1)
+    env["UAVCAN__PUB__TEMPERATURE__ID__NATURAL16"] = "2346"
+    env["UAVCAN__SUB__VOLTAGE__ID__NATURAL16"] = "2347"
+    env["MODEL__ENVIRONMENT__TEMPERATURE__REAL32"] = "300.0"  # [kelvin]
+    plant_proc = BackgroundChildProcess(
+        "python",
+        "-m",
+        "coverage",
+        "run",
+        str(DEMO_DIR / "plant.py"),
+        environment_variables=env,
+    )
+    assert plant_proc.alive
+    print("PLANT APP STARTED WITH PID", plant_proc.pid, "FROM", Path.cwd())
+
+    try:
+        registers = pyuavcan.application.register.parse_environment_variables(run_config.env.copy())
+        registers["uavcan.node.id"] = pyuavcan.application.register.Value(
+            natural16=pyuavcan.application.register.Natural16([123])
+        )
+        registers["uavcan.sub.temperature_measurement.id"] = pyuavcan.application.register.Value(
+            natural16=pyuavcan.application.register.Natural16([2346])
+        )
+        registers["uavcan.pub.temperature_setpoint.id"] = pyuavcan.application.register.Value(
+            natural16=pyuavcan.application.register.Natural16([2345])
+        )
+        node = pyuavcan.application.make_node(
+            uavcan.node.GetInfo_1_0.Response(), defaults=registers, ignore_environment_variables=True
+        )
+        node.start()
+        del node.registry["model*"]
+    except Exception:
+        demo_proc.kill()
+        plant_proc.kill()
+        raise
+
+    try:
+        sub_heartbeat = node.make_subscriber(uavcan.node.Heartbeat_1_0)
+        sub_measurement = node.make_subscriber(uavcan.si.sample.temperature.Scalar_1_0, "temperature_measurement")
+        pub_setpoint = node.make_publisher(uavcan.si.unit.temperature.Scalar_1_0, "temperature_setpoint")
+
+        last_hb_demo = uavcan.node.Heartbeat_1_0()
+        last_hb_plant = uavcan.node.Heartbeat_1_0()
+        last_meas = uavcan.si.sample.temperature.Scalar_1_0()
+
+        async def on_heartbeat(msg: uavcan.node.Heartbeat_1_0, meta: pyuavcan.transport.TransferFrom) -> None:
+            nonlocal last_hb_demo
+            nonlocal last_hb_plant
+            print(msg)
+            if meta.source_node_id == DEMO_APP_NODE_ID:
+                last_hb_demo = msg
+            elif meta.source_node_id == DEMO_APP_NODE_ID + 1:
+                last_hb_plant = msg
+
+        async def on_meas(msg: uavcan.si.sample.temperature.Scalar_1_0, meta: pyuavcan.transport.TransferFrom) -> None:
+            nonlocal last_meas
+            print(msg)
+            assert meta.source_node_id == DEMO_APP_NODE_ID + 1
+            last_meas = msg
+
+        sub_heartbeat.receive_in_background(on_heartbeat)
+        sub_measurement.receive_in_background(on_meas)
+
+        for _ in range(10):
+            assert await pub_setpoint.publish(uavcan.si.unit.temperature.Scalar_1_0(kelvin=300.0))
+            await asyncio.sleep(0.5)
+
+        assert demo_proc.alive and plant_proc.alive
+        assert 3 <= last_hb_demo.uptime <= 10
+        assert 3 <= last_hb_plant.uptime <= 10
+        assert last_hb_plant.health.value == uavcan.node.Health_1_0.NOMINAL
+        assert int((time.time() - 3.0) * 1e6) <= last_meas.timestamp.microsecond <= int(time.time() * 1e6)
+        assert last_meas.kelvin == pytest.approx(300.0)
+
+        for _ in range(10):
+            assert await pub_setpoint.publish(uavcan.si.unit.temperature.Scalar_1_0(kelvin=900.0))
+            await asyncio.sleep(0.5)
+
+        assert demo_proc.alive and plant_proc.alive
+        assert 6 <= last_hb_demo.uptime <= 15
+        assert 6 <= last_hb_plant.uptime <= 15
+        assert last_hb_plant.health.value == uavcan.node.Health_1_0.ADVISORY  # Because saturation
+        assert int((time.time() - 3.0) * 1e6) <= last_meas.timestamp.microsecond <= int(time.time() * 1e6)
+        assert 400.0 > last_meas.kelvin > 310.0
+        peak_temp = last_meas.kelvin
+        print("PEAK TEMPERATURE:", peak_temp, "K")
+
+        for _ in range(10):
+            assert await pub_setpoint.publish(uavcan.si.unit.temperature.Scalar_1_0(kelvin=0.0))
+            await asyncio.sleep(0.5)
+
+        assert demo_proc.alive and plant_proc.alive
+        assert 9 <= last_hb_demo.uptime <= 20
+        assert 9 <= last_hb_plant.uptime <= 20
+        assert last_hb_plant.health.value == uavcan.node.Health_1_0.ADVISORY  # Because saturation
+        assert int((time.time() - 3.0) * 1e6) <= last_meas.timestamp.microsecond <= int(time.time() * 1e6)
+        assert 300.0 < last_meas.kelvin < (peak_temp - 2.0)
+
+        demo_proc.wait(10.0, interrupt=True)
+        plant_proc.wait(10.0, interrupt=True)
+    finally:
+        demo_proc.kill()
+        plant_proc.kill()
+        node.close()
         await asyncio.sleep(2.0)  # Let coroutines terminate properly to avoid resource usage warnings.

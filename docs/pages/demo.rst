@@ -261,10 +261,15 @@ The response should look like:
 And the diagnostic subscriber we started in the beginning should print a log record.
 
 
-Launching another application
------------------------------
+Building a network
+------------------
 
 In this section we will introduce an additional node that will simulate the controlled plant.
+
+TODO
+
+.. literalinclude:: /../demo/plant.py
+   :linenos:
 
 
 Orchestration

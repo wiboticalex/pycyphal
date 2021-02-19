@@ -11,7 +11,7 @@ import logging
 import pyuavcan
 from ._node import Node, NodeInfo
 from . import register
-from .register.backend.sqlite import SQLiteBackend, Entry as SQLiteEntry
+from .register.backend.sqlite import SQLiteBackend
 from .register.backend.dynamic import DynamicBackend
 from ._transport_factory import make_transport
 
@@ -111,9 +111,14 @@ def make_node(
     If not given, a new transport instance will be constructed using :func:`make_transport`.
 
     Prior to construction, the register file will be updated/extended based on the register values passed via the
-    environment variables (if any).
-    Environment variables that encode empty-valued registers trigger removal of such registers from the file
-    (non-existent registers do not trigger an error).
+    environment variables (if any) and the explicit ``defaults``.
+    Environment variables and ``defaults`` that encode empty-valued registers trigger removal of such registers
+    from the file (non-existent registers do not trigger an error).
+
+    Register removal is useful, in particular, when the node needs to be switched from one transport type to another
+    (e.g., from UDP to CAN):
+    without the ability to remove registers, it would not be possible to tell the node to stop using a previously
+    configured transport without editing or removing the register file.
 
     Aside from the registers that encode the transport configuration (which are documented in :func:`make_transport`),
     the following registers are considered.
@@ -244,7 +249,10 @@ def make_node(
             if REG_UNIQUE_ID not in db:
                 uid = random.randbytes(16)
                 _logger.info("New unique-ID generated: %s", uid.hex())
-                db[REG_UNIQUE_ID] = SQLiteEntry(register.Value(unstructured=register.Unstructured(uid)), mutable=False)
+                db[REG_UNIQUE_ID] = register.backend.Entry(
+                    register.Value(unstructured=register.Unstructured(uid)),
+                    mutable=False,
+                )
             info.unique_id = bytes(register.ValueProxy(db[REG_UNIQUE_ID].value))
 
         if len(info.name) == 0:  # Do our best to decently support lazy instantiations that don't even give a name.
