@@ -164,7 +164,7 @@ def demo(session):
             continue
         session.log("Copy: %s", s)
         if s.is_dir():
-            shutil.copytree(s, tmp_dir / s.name, dirs_exist_ok=True)
+            shutil.copytree(s, tmp_dir / s.name)
         else:
             shutil.copy(s, tmp_dir)
 
