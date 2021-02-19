@@ -188,7 +188,7 @@ def make_node(
 
         Until this is implemented, to run the allocator one needs to construct the transport manually using
         :func:`make_transport`, then run the allocation client, then invoke this factory again with something like
-        ``registers={"uavcan.node.id": Value(natural16=Natural16([your_allocated_node_id]))}``.
+        ``defaults={"uavcan.node.id": Value(natural16=Natural16([your_allocated_node_id]))}``.
 
         While tedious, this is not that much of a problem because the PnP protocol is mostly intended for
         hardware nodes rather than software ones.

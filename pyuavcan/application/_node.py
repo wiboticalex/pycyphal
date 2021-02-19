@@ -29,8 +29,9 @@ class Node(abc.ABC):
     This class automatically instantiates the following application-layer function implementations:
 
     - :class:`heartbeat_publisher.HeartbeatPublisher`
-    - The register API server.
-    - The ``uavcan.node.GetInfo`` server.
+    - Register API server (``uavcan.register.*``)
+    - Node info server (``uavcan.node.GetInfo``)
+    - Port introspection publisher (``uavcan.port.List``)
 
     If the provided transport is anonymous and it is unable to construct service ports in anonymous mode,
     then RPC-services (like GetInfo, register API, etc.) are not initialized.
@@ -47,7 +48,10 @@ class Node(abc.ABC):
         # Instantiate application-layer functions. Please keep the class docstring updated when changing this.
         self._heartbeat_publisher = heartbeat_publisher.HeartbeatPublisher(self)
 
+        from ._port_list_publisher import PortListPublisher
         from ._register_server import RegisterServer
+
+        PortListPublisher(self)
 
         async def handle_get_info(_req: uavcan.node.GetInfo_1_0.Request, _meta: ServiceRequestMetadata) -> NodeInfo:
             return self.info
