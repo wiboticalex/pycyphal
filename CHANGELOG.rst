@@ -23,6 +23,8 @@ v1.2
     The respective configuration is now sourced from the registers, which in turn are read from environment variables
     and from persistent register files (i.e., configuration files).
 
+  - Support context manager API (``__enter__``, ``__leave__``).
+
   - Rework the documentation accordingly.
 
 - Fix minor issues with logging throughout.

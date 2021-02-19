@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# Distributed under CC0 1.0 Universal (CC0 1.0) Public Domain Dedication. To the extent possible under law, the
-# UAVCAN Consortium has waived all copyright and related or neighboring rights to this work.
+# Distributed under CC0 1.0 Universal (CC0 1.0) Public Domain Dedication.
 # pylint: disable=ungrouped-imports,wrong-import-position
 
 import os
@@ -45,7 +44,7 @@ import uavcan.si.unit.voltage  # noqa
 
 
 class DemoApplication:
-    REGISTER_FILE = "my_registers.db"
+    REGISTER_FILE = "demo_app.db"
     """
     The register file stores configuration parameters of the local application/node. The registers can be modified
     at launch via environment variables and at runtime via RPC-service "uavcan.register.Access".
@@ -54,14 +53,13 @@ class DemoApplication:
 
     def __init__(self) -> None:
         node_info = uavcan.node.GetInfo_1_0.Response(
-            protocol_version=uavcan.node.Version_1_0(*pyuavcan.UAVCAN_SPECIFICATION_VERSION),
             software_version=uavcan.node.Version_1_0(major=1, minor=0),
             name="org.uavcan.pyuavcan.demo.demo_app",
         )
         # The Node class is basically the central part of the library -- it is the bridge between the application and
         # the UAVCAN network. Also, it implements certain standard application-layer functions, such as publishing
-        # heartbeats, responding to GetInfo, serving the register API, etc. The file "my_registers.db" stores the
-        # registers of our node (see DSDL namespace uavcan.register). If the file does not exist, it will be created.
+        # heartbeats and port introspection messages, responding to GetInfo, serving the register API, etc.
+        # The file "my_registers.db" stores the registers of our node (see DSDL namespace uavcan.register).
         # This is optional though; if the application does not require persistent states, this parameter may be omitted,
         # in which case the register file will be stored in-memory.
         self._node = pyuavcan.application.make_node(node_info, DemoApplication.REGISTER_FILE)
@@ -98,8 +96,7 @@ class DemoApplication:
 
         self._node.create_register("thermostat.pid.gains", Value(real32=Real32([0.12, 0.18, 0.01])))  # Defaults.
 
-        # When all is initialized, don't forget to start the node!
-        self._node.start()
+        self._node.start()  # Don't forget to start the node!
 
     @staticmethod
     async def _serve_linear_least_squares(

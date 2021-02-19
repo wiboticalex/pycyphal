@@ -4,13 +4,14 @@
 
 from __future__ import annotations
 import sys
+import random
 from typing import Callable, Tuple, Optional, Union
 from pathlib import Path
 import logging
 import pyuavcan
 from ._node import Node, NodeInfo
 from . import register
-from .register.backend.sqlite import SQLiteBackend
+from .register.backend.sqlite import SQLiteBackend, Entry as SQLiteEntry
 from .register.backend.dynamic import DynamicBackend
 from ._transport_factory import make_transport
 
@@ -18,6 +19,11 @@ if sys.version_info >= (3, 9):
     from collections.abc import Mapping
 else:  # pragma: no cover
     from typing import Mapping  # pylint: disable=ungrouped-imports
+
+
+REG_UNIQUE_ID = "uavcan.node.unique_id"
+REG_DIAGNOSTIC_SEVERITY = "uavcan.diagnostic.severity"
+REG_DIAGNOSTIC_TIMESTAMP = "uavcan.diagnostic.timestamp"
 
 
 class DefaultNode(Node):
@@ -121,6 +127,14 @@ def make_node(
           - Register type
           - Register semantics
 
+        * - ``uavcan.node.unique_id``
+          - ``unstructured``
+          - The unique-ID of the local node.
+            This register is only used if the caller did not set ``unique_id`` in ``info``.
+            If not defined, a new random value is generated and stored as immutable
+            (therefore, if no persistent register file is used, a new unique-ID is generated at every launch, which
+            may be undesirable in some applications, particularly those that require PnP node-ID allocation).
+
         * - ``uavcan.diagnostic.severity``
           - ``natural16[1]``
           - If defined and the value is a valid severity level as defined in ``uavcan.diagnostic.Severity``,
@@ -136,11 +150,17 @@ def make_node(
             wall clock of the local computer.
             Otherwise, the timestamp is left at zero (which means "unknown" per Specification).
 
-    Additional functions and their respective registers will be added later (e.g., time synchronization,
-    file server, etc.).
+    Additional application-layer functions and their respective registers may be added later.
 
     :param info:
-        Response object to ``uavcan.node.GetInfo``.
+        Response object to ``uavcan.node.GetInfo``. The following fields will be populated automatically:
+
+        - ``protocol_version`` from :data:`pyuavcan.UAVCAN_SPECIFICATION_VERSION`.
+
+        - If not set by the caller: ``unique_id`` is read from register as specified above.
+
+        - If not set by the caller: ``name`` is constructed from hex-encoded unique-ID like:
+          ``anonymous.b0228a49c25ff23a3c39915f81294622``.
 
     :param register_file:
         Path to the SQLite file containing the register database; or, in other words,
@@ -196,8 +216,6 @@ def make_node(
     """
     from pyuavcan.transport.redundant import RedundantTransport
 
-    db = SQLiteBackend(register_file or "")
-
     def init_transport() -> pyuavcan.transport.Transport:
         if transport is None:
             out = make_transport(register.Registry([db]), reconfigurable=reconfigurable_transport)
@@ -212,12 +230,29 @@ def make_node(
             return out
         return transport
 
+    db = SQLiteBackend(register_file or "")
     try:
         if not ignore_environment_variables:
             _apply_env_vars(db)
         if defaults is not None:
             _apply_defaults(db, defaults)
 
+        # Populate certain fields of the node info structure automatically.
+        info.protocol_version.major, info.protocol_version.minor = pyuavcan.UAVCAN_SPECIFICATION_VERSION
+
+        if info.unique_id.sum() == 0:
+            if REG_UNIQUE_ID not in db:
+                uid = random.randbytes(16)
+                _logger.info("New unique-ID generated: %s", uid.hex())
+                db[REG_UNIQUE_ID] = SQLiteEntry(register.Value(unstructured=register.Unstructured(uid)), mutable=False)
+            info.unique_id = bytes(register.ValueProxy(db[REG_UNIQUE_ID].value))
+
+        if len(info.name) == 0:  # Do our best to decently support lazy instantiations that don't even give a name.
+            name = "anonymous." + info.unique_id.tobytes().hex()
+            _logger.info("Automatic name: %r", name)
+            info.name = name
+
+        # Construct the node.
         presentation = pyuavcan.presentation.Presentation(init_transport())
         node = DefaultNode(
             presentation,
@@ -263,7 +298,7 @@ def _apply_defaults(db: SQLiteBackend, defaults: Mapping[str, Union[register.Val
 
 def _make_diagnostic_publisher(node: Node) -> None:
     try:
-        uavcan_severity = int(node.registry["uavcan.diagnostic.severity"])
+        uavcan_severity = int(node.registry[REG_DIAGNOSTIC_SEVERITY])
     except KeyError:
         return
 
@@ -276,7 +311,7 @@ def _make_diagnostic_publisher(node: Node) -> None:
 
     diag_publisher = DiagnosticPublisher(node, level=level)
     try:
-        diag_publisher.timestamping_enabled = bool(node.registry["uavcan.diagnostic.timestamp"])
+        diag_publisher.timestamping_enabled = bool(node.registry[REG_DIAGNOSTIC_TIMESTAMP])
     except KeyError:
         pass
     logging.root.addHandler(diag_publisher)

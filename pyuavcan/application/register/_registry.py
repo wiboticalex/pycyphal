@@ -129,6 +129,8 @@ class Registry(Mapping[str, ValueProxyWithFlags]):
     >>> del r["*a*"]
     >>> list(r.keys())
     ['c', 'foo', 'b']
+
+    TODO: Add modification callbacks to allow applications implement hot reloading.
     """
 
     def __init__(self, backends: Iterable[backend.Backend]) -> None:

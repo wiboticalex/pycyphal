@@ -1,7 +1,7 @@
 .. _demo_app:
 
-Demo application
-================
+Demo
+====
 
 The reader is assumed to have at least skimmed through *The UAVCAN Guide* beforehand.
 See `uavcan.org <https://uavcan.org>`_ for details.
@@ -32,11 +32,12 @@ The referenced DSDL definitions are provided below.
    :linenos:
 
 
-Source code
------------
+Application source code
+-----------------------
 
 The demo relies on the custom data types presented above.
 To run it, copy-paste its source code into a file on your computer and update the DSDL paths to match your environment.
+The public regulated data types can be cloned from https://github.com/UAVCAN/public_regulated_data_types .
 
 .. literalinclude:: /../demo/demo_app.py
    :linenos:
@@ -56,8 +57,8 @@ Ahead-of-time DSDL compilation can be trivially implemented in ``setup.py``:
    :linenos:
 
 
-Running the demo
-----------------
+Running the application
+-----------------------
 
 If you just run the demo application as-is,
 you will notice that it fails with an error referring to some *missing registers*.
@@ -104,8 +105,8 @@ without the need to resort to any secondary management interfaces.
 This is equally true for software nodes like our demo application and hardware nodes like embedded devices.
 
 
-Poking the demo using Yakut
----------------------------
+Poking the application using Yakut
+----------------------------------
 
 The demo is running now so we can interact with it and see how it responds.
 We could write another script for that using PyUAVCAN, but in this section we will instead use
@@ -139,8 +140,8 @@ Again, if you are using PowerShell on Windows, replace ``export`` with ``$env:``
 Further snippets will not include this remark.
 
 
-Interacting with the demo
-+++++++++++++++++++++++++
+Interacting with the application
+++++++++++++++++++++++++++++++++
 
 To listen to the demo's heartbeat and diagnostics, run the following commands in new terminals:
 
@@ -258,6 +259,12 @@ The response should look like:
       y_intercept: 2.0
 
 And the diagnostic subscriber we started in the beginning should print a log record.
+
+
+Launching another application
+-----------------------------
+
+In this section we will introduce an additional node that will simulate the controlled plant.
 
 
 Orchestration

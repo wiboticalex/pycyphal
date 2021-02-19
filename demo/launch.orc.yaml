@@ -6,18 +6,14 @@ YAKUT_TRANSPORT:      UDP('127.9.0.111')
 YAKUT_COMPILE_OUTPUT: .yakut_compiled
 YAKUT_PATH:           .yakut_compiled
 
-# Shared registers for all nodes/processes (can be overridden in local scopes)
-uavcan:
-  udp.ip: 127.9.0.0
-  diagnostic.severity: 2
-  diagnostic.timestamp: true
-  sub:
-    temperature_setpoint.id:    2345
-    temperature_measurement.id: 2346
-  pub:
-    heater_voltage.id: 2347
-  srv:
-    least_squares.id: 123
+# Shared registers for all nodes/processes (can be overridden or removed in local scopes)
+uavcan:   # See the docs for make_node() to see which registers can be used.
+  # Redundant transport, UDP+Serial:
+  udp.ip:       127.9.0.0
+  serial.port:  socket://localhost:50905
+  diagnostic:
+    severity: 2
+    timestamp: true
 
 # Keys with "=" define imperatives rather than registers or environment variables.
 main=:
@@ -41,5 +37,12 @@ main=:
   # Registers for this composition specifically (not visible outside of this block)
   uavcan:
     node.id: 42
+    sub:
+      temperature_setpoint.id:    2345
+      temperature_measurement.id: 2346
+    pub:
+      heater_voltage.id: 2347
+    srv:
+      least_squares.id: 123
   thermostat:
     pid.gains: [0.1, 0, 0]

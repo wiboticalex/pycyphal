@@ -3,10 +3,11 @@
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
 from __future__ import annotations
-from typing import Union, Callable, Tuple, Type, TypeVar, Optional, List
+from typing import Union, Callable, Tuple, Type, TypeVar, Optional, List, Any
 import abc
 import asyncio
 import logging
+import contextlib
 import uavcan.node
 import pyuavcan
 from pyuavcan.presentation import Presentation, ServiceRequestMetadata, Publisher, Subscriber, Server, Client
@@ -20,7 +21,7 @@ MessageClass = TypeVar("MessageClass", bound=pyuavcan.dsdl.CompositeObject)
 ServiceClass = TypeVar("ServiceClass", bound=pyuavcan.dsdl.ServiceObject)
 
 
-class Node(abc.ABC):
+class Node(contextlib.AbstractContextManager["Node"]):
     """
     This is the top-level abstraction representing a UAVCAN node on the bus.
     This is an abstract class; instantiate it using the factory :func:`pyuavcan.application.make_node`
@@ -266,6 +267,19 @@ class Node(abc.ABC):
                 self._on_start.append(start)
         if close is not None:
             self._on_close.append(close)
+
+    def __enter__(self) -> Node:
+        """
+        Invokes :meth:`start` upon entering the context. Does nothing if already started.
+        """
+        self.start()
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        """
+        Invokes :meth:`close` upon leaving the context. Does nothing if already closed.
+        """
+        self.close()
 
     def __repr__(self) -> str:
         return pyuavcan.util.repr_attributes(self, self.info, self.presentation, self.registry)

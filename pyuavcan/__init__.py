@@ -51,7 +51,8 @@ __license__ = "MIT"
 UAVCAN_SPECIFICATION_VERSION = 1, 0
 """
 Version of the UAVCAN protocol implemented by this library, major and minor.
-Use this value to populate the corresponding field in ``uavcan.node.GetInfo.Response``.
+The corresponding field in ``uavcan.node.GetInfo.Response`` is initialized from this value,
+see :func:`pyuavcan.application.make_node`.
 """
 
 
