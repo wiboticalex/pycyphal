@@ -161,15 +161,15 @@ Add another subscriber to see the published voltage command:
 ..  code-block:: sh
 
     export YAKUT_TRANSPORT="UDP('127.9.0.111')"
-    yakut sub -M 2347.uavcan.si.unit.voltage.Scalar.1.0
+    yakut sub -M 2347:uavcan.si.unit.voltage.Scalar.1.0
 
 And publish the setpoint along with measurement (process variable):
 
 ..  code-block:: sh
 
     export YAKUT_TRANSPORT="UDP('127.9.0.111')"
-    yakut pub 2345.uavcan.si.unit.temperature.Scalar.1.0   'kelvin: 250' \
-              2346.uavcan.si.sample.temperature.Scalar.1.0 'kelvin: 240' \
+    yakut pub 2345:uavcan.si.unit.temperature.Scalar.1.0   'kelvin: 250' \
+              2346:uavcan.si.sample.temperature.Scalar.1.0 'kelvin: 240' \
               -N10                                                          # Repeat 10 times
 
 You should see the voltage subscriber (subject-ID 2347) print something along these lines:
@@ -247,7 +247,7 @@ Now let's try the linear regression service:
 
 .. code-block:: sh
 
-    yakut call 42 123.sirius_cyber_corp.PerformLinearLeastSquaresFit.1.0 'points: [{x: 10, y: 3}, {x: 20, y: 4}]'
+    yakut call 42 123:sirius_cyber_corp.PerformLinearLeastSquaresFit.1.0 'points: [{x: 10, y: 3}, {x: 20, y: 4}]'
 
 The response should look like:
 

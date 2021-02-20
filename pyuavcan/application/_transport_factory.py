@@ -93,7 +93,7 @@ def make_transport(
             If not provided, a sensible default is deduced using heuristics.
 
         * - ``uavcan.can.bitrate``
-          - ``natural16[2]``
+          - ``natural32[2]``
           - The bitrates to use for all constructed CAN transports
             for arbitration (first value) and data (second value) segments.
             To use Classic CAN, set both to the same value and set MTU = 8.

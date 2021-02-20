@@ -4,12 +4,13 @@
 # happening on the network.
 # Read the docs about the file format: yakut orchestrate --help
 
-# Shared environment variables for all nodes/processes
-YAKUT_TRANSPORT:      UDP('127.9.0.0', local_node_id=None)
+# Shared environment variables for all nodes/processes:
 YAKUT_COMPILE_OUTPUT: .yakut_compiled
-YAKUT_PATH:           .yakut_compiled
+YAKUT_PATH: .yakut_compiled
+# Here we use Yakut for compiling DSDL. Normally one should use Nunavut though: https://github.com/UAVCAN/nunavut
+PYTHONPATH: .yakut_compiled
 
-# Shared registers for all nodes/processes (can be overridden or removed in local scopes)
+# Shared registers for all nodes/processes (can be overridden or removed in local scopes):
 uavcan:   # See the docs for make_node() to see which registers can be used here.
   # Redundant transport, UDP+Serial:
   udp.ip: 127.9.0.0
@@ -27,14 +28,14 @@ uavcan:   # See the docs for make_node() to see which registers can be used here
 main=:
 - ?=: '[ ! -d $YAKUT_COMPILE_OUTPUT ]'  # If the output directory does not exist, run the Yakut DSDL compiler.
   main=:                                # All script statements run concurrently.
-  - echo "Compiling DSDL for Yakut, this may take a while"
+  - echo "Compiling DSDL, this may take a while"
   - yakut compile custom_data_types/sirius_cyber_corp public_regulated_data_types/uavcan
 
 - # An empty statement is a join statement -- wait for the previously launched processes to exit before continuing.
 
 - main=:
-  - sleep 1   # Wait a bit to let the diagnostic subscriber get ready (it is launched below).
-  -           # Remember, everything runs concurrently by default, but this join statements waits for the sleep to exit.
+  - sleep 1   # Wait a bit to let the diagnostic subscribers get ready (they are launched below).
+  -           # Remember, everything runs concurrently by default, but this join statement waits for the sleep to exit.
 
   # Launch the demo app.
   - main=:
@@ -62,15 +63,14 @@ main=:
 
   # Publish the setpoint a few times to show how the thermostat drives the plant to the correct temperature.
   # You can publish a different setpoint by running this command in a separate terminal to see how the system responds:
-  #   $ export YAKUT_TRANSPORT="UDP('127.9.0.0')"
-  #   $ yakut pub 2345.uavcan.si.unit.temperature.Scalar.1.0 "kelvin: 200"
+  #   $ yakut -i "UDP('127.9.0.0', 100)" pub 2345:uavcan.si.unit.temperature.Scalar.1.0 "kelvin: 200"
   - main=: |
-      yakut pub 2345.uavcan.si.unit.temperature.Scalar.1.0 "kelvin: 350.0" -N3
-    YAKUT_TRANSPORT: UDP('127.9.0.0', local_node_id=1000)
+      yakut pub 2345:uavcan.si.unit.temperature.Scalar.1.0 "kelvin: 350.0" -N3
+    uavcan.node.id: 100
 
 # Launch diagnostic subscribers to print messages in the terminal that runs the orchestrator.
 - yakut subscribe uavcan.diagnostic.Record.1.1
-- yakut --format=json subscribe --no-metadata 2346.uavcan.si.sample.temperature.Scalar.1.0
+- yakut --format=json subscribe --no-metadata 2346:uavcan.si.sample.temperature.Scalar.1.0
 
 - ?=: test -n "$STOP_AFTER"   # Exit automatically if STOP_AFTER is defined (frankly, this is just a testing aid).
   main=: sleep $STOP_AFTER && exit 111
