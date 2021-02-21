@@ -82,8 +82,12 @@ class DemoApplication:
         self._pub_v_cmd = self._node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0, "heater_voltage")
 
         # Create an RPC-server. The service-ID is read from standard register "uavcan.srv.least_squares.id".
-        srv_least_squares = self._node.get_server(sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0, "least_squares")
-        srv_least_squares.serve_in_background(self._serve_linear_least_squares)
+        # This service is optional: if the service-ID is not specified, we simply don't provide it.
+        try:
+            srv_least_sq = self._node.get_server(sirius_cyber_corp.PerformLinearLeastSquaresFit_1_0, "least_squares")
+            srv_least_sq.serve_in_background(self._serve_linear_least_squares)
+        except pyuavcan.application.register.MissingRegisterError:
+            logging.info("The least squares service is disabled by configuration")
 
         # Create another RPC-server using a standard service type for which a fixed service-ID is defined.
         # We don't specify the port name so the service-ID defaults to the fixed port-ID.

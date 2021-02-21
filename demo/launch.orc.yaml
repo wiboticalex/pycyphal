@@ -15,10 +15,10 @@ uavcan:   # See the docs for make_node() to see which registers can be used here
   # Redundant transport, UDP+Serial:
   udp.ip: 127.9.0.0
   serial.port: socket://localhost:50905
-  # It is recommended to set unused transports to 'empty' (by making them NULL-valued) explicitly to ensure that
+  # It is recommended to set unused transports to 'empty' (by making them null-valued) explicitly to ensure that
   # previously stored transport configurations are not accidentally reused.
   # Null-valued registers passed via environment variables are removed from the register file.
-  can.iface: null
+  can.iface:
   # Configure diagnostic publishing, too.
   diagnostic:
     severity: 2
@@ -38,18 +38,15 @@ main=:
   - sleep 1
   - # Remember, everything runs concurrently by default, but this join statement waits for the sleep to exit.
 
-  # Launch the demo app.
+  # Launch the demo app that implements the thermostat.
   - main=:
     - ./demo_app.py
     uavcan:
       node.id: 42
-      sub:
-        temperature_setpoint.id:    2345
-        temperature_measurement.id: 2346
-      pub:
-        heater_voltage.id:          2347
-      srv:
-        least_squares.id:           123
+      sub.temperature_setpoint.id:    2345
+      sub.temperature_measurement.id: 2346
+      pub.heater_voltage.id:          2347
+      srv.least_squares.id: 0xFFFF    # We don't need this service. Disable by setting an invalid ID or NULL.
     thermostat:
       pid.gains: [0.1, 0, 0]
 
@@ -74,8 +71,8 @@ main=:
 - yakut --format=json subscribe --no-metadata 2346:uavcan.si.sample.temperature.Scalar.1.0
 
 # Above you can see that the serial transport is configured in the TCP tunnel mode via endpoint 'localhost:50905'.
-# The transport will fail to initialize unless a broker is available there, so we launch it.
-# If you don't have ncat installed, you can just remove this line and replace the serial port config above with 'null'.
+# The transport will fail to initialize unless a broker is available there, so we launch it. If you don't have ncat
+# installed, you can just remove this line and replace the serial port config above with 'null' or empty (same thing).
 - ncat --broker --listen --source-port 50905
 
 # Exit automatically if STOP_AFTER is defined (frankly, this is just a testing aid, feel free to ignore).

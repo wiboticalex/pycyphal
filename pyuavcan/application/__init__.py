@@ -245,6 +245,7 @@ There are three places:
     >>> import os
     >>> os.environ["UAVCAN__NODE__ID__NATURAL16"]                   = "42"
     >>> os.environ["UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16"]  = "6543"
+    >>> os.environ["UAVCAN__SUB__OPTIONAL_PORT__ID__NATURAL16"]     = "65535"
     >>> os.environ["UAVCAN__UDP__IP__STRING"]                       = "127.63.0.0"
     >>> os.environ["UAVCAN__SERIAL__PORT__STRING"]                  = "socket://localhost:50905"
     >>> os.environ["M__MOTOR__INDUCTANCE_DQ__REAL64"]               = "0.12 0.13"
@@ -255,6 +256,7 @@ There are three places:
 ...         print(k.ljust(47), os.environ[k])
 UAVCAN__NODE__ID__NATURAL16                     42
 UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16    6543
+UAVCAN__SUB__OPTIONAL_PORT__ID__NATURAL16       65535
 UAVCAN__UDP__IP__STRING                         127.63.0.0
 UAVCAN__SERIAL__PORT__STRING                    socket://localhost:50905
 M__MOTOR__INDUCTANCE_DQ__REAL64                 0.12 0.13
@@ -275,10 +277,10 @@ RedundantTransport(UDPTransport('127.63.0.42', ...), SerialTransport('socket://l
 >>> pub_voltage.close()
 >>> node.registry["m.motor.inductance_dq"].floats   # Application parameters.
 [0.12, 0.13]
->>> node.make_publisher(uavcan.si.unit.voltage.Scalar_1_0, "no_such_port")  # doctest: +IGNORE_EXCEPTION_DETAIL
+>>> node.make_subscriber(uavcan.si.unit.voltage.Scalar_1_0, "optional_port")  # doctest: +IGNORE_EXCEPTION_DETAIL
 Traceback (most recent call last):
 ...
-MissingRegisterError: 'uavcan.pub.no_such_port.id'
+MissingRegisterError: 'uavcan.sub.optional_port.id'
 
 ..  doctest::
     :hide:

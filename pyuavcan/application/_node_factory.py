@@ -26,6 +26,10 @@ REG_DIAGNOSTIC_SEVERITY = "uavcan.diagnostic.severity"
 REG_DIAGNOSTIC_TIMESTAMP = "uavcan.diagnostic.timestamp"
 
 
+class MissingTransportConfigurationError(register.MissingRegisterError):
+    pass
+
+
 class DefaultNode(Node):
     """
     This is a Voldemort type, hence it doesn't need public docs.
@@ -229,7 +233,7 @@ def make_node(
             out = make_transport(register.Registry([db]), reconfigurable=reconfigurable_transport)
             if out is not None:
                 return out
-            raise register.MissingRegisterError(
+            raise MissingTransportConfigurationError(
                 f"Available registers do not encode a valid transport configuration: {list(db)}"
             )
         if not isinstance(transport, RedundantTransport) and reconfigurable_transport:

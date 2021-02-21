@@ -14,6 +14,7 @@ from pyuavcan.presentation import Presentation
 @pytest.mark.asyncio  # type: ignore
 async def _unittest_slow_node(compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInfo]) -> None:
     from pyuavcan.application import make_node
+    import uavcan.primitive
     from uavcan.node import Version_1_0, Heartbeat_1_0, GetInfo_1_0, Mode_1_0, Health_1_0
 
     asyncio.get_running_loop().slow_callback_duration = 3.0
@@ -35,6 +36,25 @@ async def _unittest_slow_node(compiled: typing.List[pyuavcan.dsdl.GeneratedPacka
         assert node.presentation.transport is trans
         node.start()
         node.start()  # Idempotency
+
+        # Check port instantiation API for non-fixed-port-ID types.
+        assert "uavcan.pub.optional.id" not in node.registry  # Nothing yet.
+        with pytest.raises(KeyError, match=r".*uavcan\.pub\.optional\.id.*"):
+            node.make_publisher(uavcan.primitive.Empty_1_0, "optional")
+        assert 0xFFFF == int(node.registry["uavcan.pub.optional.id"])  # Created automatically!
+        with pytest.raises(TypeError):
+            node.make_publisher(uavcan.primitive.Empty_1_0)
+
+        # Same but for fixed port-ID types.
+        assert "uavcan.pub.atypical_heartbeat.id" not in node.registry  # Nothing yet.
+        port = node.make_publisher(uavcan.node.Heartbeat_1_0, "atypical_heartbeat")
+        assert port.port_id == pyuavcan.dsdl.get_model(uavcan.node.Heartbeat_1_0).fixed_port_id
+        port.close()
+        assert 0xFFFF == int(node.registry["uavcan.pub.atypical_heartbeat.id"])  # Created automatically!
+        node.registry["uavcan.pub.atypical_heartbeat.id"] = 111  # Override the default.
+        port = node.make_publisher(uavcan.node.Heartbeat_1_0, "atypical_heartbeat")
+        assert port.port_id == 111
+        port.close()
 
         node.heartbeat_publisher.priority = pyuavcan.transport.Priority.FAST
         node.heartbeat_publisher.period = 0.5

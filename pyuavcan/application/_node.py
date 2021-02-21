@@ -20,6 +20,10 @@ MessageClass = TypeVar("MessageClass", bound=pyuavcan.dsdl.CompositeObject)
 ServiceClass = TypeVar("ServiceClass", bound=pyuavcan.dsdl.ServiceObject)
 
 
+class MissingPortConfigurationError(register.MissingRegisterError):
+    pass
+
+
 class Node(abc.ABC):
     """
     This is the top-level abstraction representing a UAVCAN node on the bus.
@@ -156,77 +160,111 @@ class Node(abc.ABC):
         """
         Wrapper over :meth:`pyuavcan.presentation.Presentation.make_publisher`
         that takes the subject-ID from the standard register ``uavcan.pub.PORT_NAME.id``.
-        If the register is missing, the fixed subject-ID is used unless it is also missing.
+        If the register is missing or no name is given, the fixed subject-ID is used unless it is also missing.
         The type information is automatically exposed via ``uavcan.pub.PORT_NAME.type`` based on dtype.
         For details on the standard registers see Specification.
 
-        :raises: :class:`register.MissingRegisterError` if the register is missing and no fixed port-ID is defined.
+        :raises:
+            :class:`register.MissingRegisterError` if the register is missing and no fixed port-ID is defined.
+            :class:`TypeError` if no name is given and no fixed port-ID is defined.
         """
-        return self.presentation.make_publisher(dtype, self._resolve_port(dtype, "pub", port_name))
+        if port_name:
+            return self.presentation.make_publisher(dtype, self._resolve_named_port(dtype, "pub", port_name))
+        return self.presentation.make_publisher_with_fixed_subject_id(dtype)  # type: ignore
 
     def make_subscriber(self, dtype: Type[MessageClass], port_name: str = "") -> Subscriber[MessageClass]:
         """
         Wrapper over :meth:`pyuavcan.presentation.Presentation.make_subscriber`
         that takes the subject-ID from the standard register ``uavcan.sub.PORT_NAME.id``.
-        If the register is missing, the fixed subject-ID is used unless it is also missing.
+        If the register is missing or no name is given, the fixed subject-ID is used unless it is also missing.
         The type information is automatically exposed via ``uavcan.sub.PORT_NAME.type`` based on dtype.
         For details on the standard registers see Specification.
 
-        :raises: :class:`register.MissingRegisterError` if the register is missing and no fixed port-ID is defined.
+        :raises:
+            :class:`register.MissingRegisterError` if the register is missing and no fixed port-ID is defined.
+            :class:`TypeError` if no name is given and no fixed port-ID is defined.
         """
-        return self.presentation.make_subscriber(dtype, self._resolve_port(dtype, "sub", port_name))
+        if port_name:
+            return self.presentation.make_subscriber(dtype, self._resolve_named_port(dtype, "sub", port_name))
+        return self.presentation.make_subscriber_with_fixed_subject_id(dtype)  # type: ignore
 
     def make_client(self, dtype: Type[ServiceClass], server_node_id: int, port_name: str = "") -> Client[ServiceClass]:
         """
         Wrapper over :meth:`pyuavcan.presentation.Presentation.make_client`
         that takes the service-ID from the standard register ``uavcan.cln.PORT_NAME.id``.
-        If the register is missing, the fixed service-ID is used unless it is also missing.
+        If the register is missing or no name is given, the fixed service-ID is used unless it is also missing.
         The type information is automatically exposed via ``uavcan.cln.PORT_NAME.type`` based on dtype.
         For details on the standard registers see Specification.
 
-        :raises: :class:`register.MissingRegisterError` if the register is missing and no fixed port-ID is defined.
+        :raises:
+            :class:`register.MissingRegisterError` if the register is missing and no fixed port-ID is defined.
+            :class:`TypeError` if no name is given and no fixed port-ID is defined.
         """
-        return self.presentation.make_client(
-            dtype,
-            service_id=self._resolve_port(dtype, "cln", port_name),
-            server_node_id=server_node_id,
-        )
+        if port_name:
+            return self.presentation.make_client(
+                dtype,
+                service_id=self._resolve_named_port(dtype, "cln", port_name),
+                server_node_id=server_node_id,
+            )
+        return self.presentation.make_client_with_fixed_service_id(dtype, server_node_id=server_node_id)  # type: ignore
 
     def get_server(self, dtype: Type[ServiceClass], port_name: str = "") -> Server[ServiceClass]:
         """
         Wrapper over :meth:`pyuavcan.presentation.Presentation.get_server`
         that takes the service-ID from the standard register ``uavcan.srv.PORT_NAME.id``.
-        If the register is missing, the fixed service-ID is used unless it is also missing.
+        If the register is missing or no name is given, the fixed service-ID is used unless it is also missing.
         The type information is automatically exposed via ``uavcan.srv.PORT_NAME.type`` based on dtype.
         For details on the standard registers see Specification.
 
-        :raises: :class:`register.MissingRegisterError` if the register is missing and no fixed port-ID is defined.
+        :raises:
+            :class:`register.MissingRegisterError` if the register is missing and no fixed port-ID is defined.
+            :class:`TypeError` if no name is given and no fixed port-ID is defined.
         """
-        return self.presentation.get_server(dtype, self._resolve_port(dtype, "srv", port_name))
+        if port_name:
+            return self.presentation.get_server(dtype, self._resolve_named_port(dtype, "srv", port_name))
+        return self.presentation.get_server_with_fixed_service_id(dtype)  # type: ignore
 
-    def _resolve_port(self, dtype: Type[pyuavcan.dsdl.CompositeObject], kind: str, name: str) -> int:
+    def _resolve_named_port(self, dtype: Type[pyuavcan.dsdl.CompositeObject], kind: str, name: str) -> int:
+        assert name, "Internal error"
         model = pyuavcan.dsdl.get_model(dtype)
-        name = name or str(model).lower()  # Convenience tweak: make the port name default to the data type name.
+
+        # Read or create the port-ID register.
         id_register_name = f"uavcan.{kind}.{name}.id"
         try:
             port_id = int(self.registry[id_register_name])
-        except register.MissingRegisterError as ex:
-            if not model.has_fixed_port_id:
-                raise register.MissingRegisterError(
-                    f"Cannot initialize {kind}-port {name!r} because register "
-                    f"{id_register_name!r} is missing and no fixed port-ID is defined for {model}. "
-                    f"Check if the environment variables are passed correctly or if the application is using the "
-                    f"correct register file."
-                ) from ex
-            port_id = model.fixed_port_id
-            # Expose the port-ID information to other network participants. This is not mandatory though.
-            self.create_register(id_register_name, lambda: register.Value(natural16=register.Natural16([port_id])))
-        # Expose the type information to other network participants.
+        except register.MissingRegisterError:
+            # Since we have a name, we want this port to be reconfigurable, so we ensure the register exists.
+            port_id = 0xFFFF  # Per Specification, this value stands for uninitialized/disabled port.
+            self.create_register(id_register_name, register.Value(natural16=register.Natural16([port_id])))
+
+        # Expose the type information to other network participants as prescribed by the Specification.
         self.create_register(
             f"uavcan.{kind}.{name}.type", lambda: register.Value(string=register.String(str(model))), overwrite=True
         )
-        _logger.debug("%r: Port-ID %r %r resolved as %r", self, kind, name, port_id)
-        return port_id
+
+        # Check if the value stored in the register is actually valid.
+        mask = {
+            "pub": pyuavcan.transport.MessageDataSpecifier.SUBJECT_ID_MASK,
+            "sub": pyuavcan.transport.MessageDataSpecifier.SUBJECT_ID_MASK,
+            "cln": pyuavcan.transport.ServiceDataSpecifier.SERVICE_ID_MASK,
+            "srv": pyuavcan.transport.ServiceDataSpecifier.SERVICE_ID_MASK,
+        }[kind]
+        if 0 <= port_id <= mask:
+            return port_id
+
+        # Default to the fixed port-ID if the register value is invalid.
+        _logger.debug("%r: %r = %r not in [0, %d], assume undefined", self, id_register_name, port_id, mask)
+        if model.fixed_port_id is not None:
+            assert isinstance(model.fixed_port_id, int)
+            return model.fixed_port_id
+
+        raise MissingPortConfigurationError(
+            id_register_name,
+            f"Cannot initialize {kind}-port {name!r} because the register "
+            f"does not define a valid port-ID and no fixed port-ID is defined for {model}. "
+            f"Check if the environment variables are passed correctly or if the application is using the "
+            f"correct register file.",
+        )
 
     def start(self) -> None:
         """
