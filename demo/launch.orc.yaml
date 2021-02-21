@@ -2,7 +2,7 @@
 # This orchestration file (orc-file) launches the demo app and a simulator of the plant controlled by the thermostat.
 # It also starts a couple of diagnostic commands that print certain subjects to the terminal to let you see what is
 # happening on the network.
-# Read the docs about the file format: yakut orchestrate --help
+# Read the docs about orc-file syntax: yakut orchestrate --help
 
 # Shared environment variables for all nodes/processes:
 YAKUT_COMPILE_OUTPUT: .yakut_compiled

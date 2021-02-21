@@ -247,7 +247,8 @@ def make_node(
 
         if info.unique_id.sum() == 0:
             if REG_UNIQUE_ID not in db:
-                uid = random.randbytes(16)
+                uid_size_bytes = 16
+                uid = random.getrandbits(8 * uid_size_bytes).to_bytes(uid_size_bytes, sys.byteorder)
                 _logger.info("New unique-ID generated: %s", uid.hex())
                 db[REG_UNIQUE_ID] = register.backend.Entry(
                     register.Value(unstructured=register.Unstructured(uid)),
