@@ -98,7 +98,7 @@ def test(session):
         pytest("--ignore", str(postponed), *map(str, src_dirs))
         pytest(str(postponed))
     finally:
-        broker_process.kill()
+        broker_process.terminate()
 
     # Coverage analysis and report.
     fail_under = 0 if session.posargs else 90
@@ -169,7 +169,12 @@ def demo(session):
             shutil.copy(s, tmp_dir)
 
     session.env["STOP_AFTER"] = "10"
-    session.run("yakut", "orc", "launch.orc.yaml", success_codes=[111])
+
+    proc_broker = subprocess.Popen(["ncat", "--broker", "--listen", "-p", "50905"])
+    try:
+        session.run("yakut", "orc", "launch.orc.yaml", success_codes=[111])
+    finally:
+        proc_broker.terminate()
 
 
 @nox.session(python=PYTHONS)
