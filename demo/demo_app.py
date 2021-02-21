@@ -67,7 +67,7 @@ class DemoApplication:
         self._node = pyuavcan.application.make_node(
             node_info,
             DemoApplication.REGISTER_FILE,
-            schema={  # Register types and default values are defined at the initialization stage like so.
+            {  # Register types and defaults are defined at the initialization stage like this.
                 "thermostat.pid.gains": Value(real32=Real32([0.12, 0.18, 0.01])),
             },
         )

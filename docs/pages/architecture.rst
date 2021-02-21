@@ -42,7 +42,7 @@ each implementing a well-segregated part of the protocol:
 
 .. note::
    In order to use this library the user should at least skim through the API docs for
-   :mod:`pyuavcan.application` and check out the :ref:`demo_app`.
+   :mod:`pyuavcan.application` and check out the :ref:`demo`.
 
 The overall structure of the library and its mapping onto the UAVCAN protocol is shown on the following diagram:
 
@@ -271,7 +271,7 @@ so it is not auto-imported.
 A typical usage scenario is to either distribute compiled DSDL namespaces together with the application,
 or to generate them lazily before importing this submodule.
 
-Chapter :ref:`demo_app` contains a complete usage example.
+Chapter :ref:`demo` contains a complete usage example.
 
 
 High-level functions

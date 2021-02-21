@@ -25,21 +25,21 @@ uavcan:   # See the docs for make_node() to see which registers can be used here
     timestamp: true
 
 # Keys with "=" define imperatives rather than registers or environment variables.
-main=:
+$=:
 - ?=: '[ ! -d $YAKUT_COMPILE_OUTPUT ]'  # If the output directory does not exist, run the Yakut DSDL compiler.
-  main=:                                # All script statements run concurrently.
+  $=:                                   # All script statements run concurrently.
   - echo "Compiling DSDL, this may take a while"
   - yakut compile custom_data_types/sirius_cyber_corp public_regulated_data_types/uavcan
 
 - # An empty statement is a join statement -- wait for the previously launched processes to exit before continuing.
 
-- main=:
+- $=:
   # Wait a bit to let the serial broker and the diagnostic subscribers get ready (they are launched below).
   - sleep 1
   - # Remember, everything runs concurrently by default, but this join statement waits for the sleep to exit.
 
   # Launch the demo app that implements the thermostat.
-  - main=:
+  - $=:
     - ./demo_app.py
     uavcan:
       node.id: 42
@@ -51,7 +51,7 @@ main=:
       pid.gains: [0.1, 0, 0]
 
   # Launch the controlled plant simulator.
-  - main=:
+  - $=:
     - ./plant.py
     uavcan:
       node.id: 43
@@ -62,7 +62,7 @@ main=:
   # Publish the setpoint a few times to show how the thermostat drives the plant to the correct temperature.
   # You can publish a different setpoint by running this command in a separate terminal to see how the system responds:
   #   $ yakut -i "UDP('127.9.0.0', 100)" pub 2345:uavcan.si.unit.temperature.Scalar.1.0 "kelvin: 200"
-  - main=: |
+  - $=: |
       yakut pub 2345:uavcan.si.unit.temperature.Scalar.1.0 "kelvin: 350.0" -N3
     uavcan.node.id: 100
 
@@ -77,4 +77,4 @@ main=:
 
 # Exit automatically if STOP_AFTER is defined (frankly, this is just a testing aid, feel free to ignore).
 - ?=: test -n "$STOP_AFTER"
-  main=: sleep $STOP_AFTER && exit 111
+  $=: sleep $STOP_AFTER && exit 111

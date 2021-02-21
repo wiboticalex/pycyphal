@@ -259,7 +259,7 @@ M__MOTOR__INDUCTANCE_DQ__REAL64                 0.12 0.13
 >>> node = pyuavcan.application.make_node(
 ...     node_info,
 ...     "registers.db",     # The file will be created if doesn't exist.
-...     schema={          # Configure default logging severity and a custom register.
+...     {                   # Configure default logging severity and a custom register.
 ...         "uavcan.diagnostic.severity": Value(natural16=pyuavcan.application.register.Natural16([2])),
 ...         "custom.register": Value(real64=pyuavcan.application.register.Real64([1.23, -8.15])),
 ...     },
@@ -289,7 +289,7 @@ As mentioned above, when the schema type is changed, existing values are type-co
 >>> node = pyuavcan.application.make_node(
 ...     node_info,
 ...     "registers.db",     # The file was just created above.
-...     schema={            # Notice that the type is now different!
+...     {                   # Notice that the type is now different!
 ...         "custom.register": Value(integer8=pyuavcan.application.register.Integer8([99, -88])),
 ...     },
 ... )

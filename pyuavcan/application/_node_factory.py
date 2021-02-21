@@ -179,9 +179,10 @@ def make_node(
 
         Existing registers of matching type will be kept unchanged.
         Existing registers of a different type will be type-converted to the specified type.
-        Missing registers will be created.
+        Missing registers will be created with the specified value.
 
-        Empty values trigger removal of corresponding registers from the register file.
+        Empty values trigger removal of corresponding registers from the register file
+        (but note that they may be re-created from environment variables afterward).
 
         Use this parameter to define the register schema of the node.
         Do not use it for setting default node-ID or port-IDs.

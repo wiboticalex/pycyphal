@@ -1,4 +1,4 @@
-.. _demo_app:
+.. _demo:
 
 Demo
 ====
