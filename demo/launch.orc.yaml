@@ -14,10 +14,10 @@ PYTHONPATH: .yakut_compiled
 uavcan:   # See the docs for make_node() to see which registers can be used here.
   # Redundant transport, UDP+Serial:
   udp.ip: 127.9.0.0
-  serial.port:  socket://localhost:50905
+  serial.port: socket://localhost:50905
   # It is recommended to set unused transports to 'empty' (by making them NULL-valued) explicitly to ensure that
   # previously stored transport configurations are not accidentally reused.
-  # Nulls trigger removal of their register from the file.
+  # Null-valued registers passed via environment variables are removed from the register file.
   can.iface: null
   # Configure diagnostic publishing, too.
   diagnostic:
@@ -34,8 +34,9 @@ main=:
 - # An empty statement is a join statement -- wait for the previously launched processes to exit before continuing.
 
 - main=:
-  - sleep 1   # Wait a bit to let the diagnostic subscribers get ready (they are launched below).
-  -           # Remember, everything runs concurrently by default, but this join statement waits for the sleep to exit.
+  # Wait a bit to let the serial broker and the diagnostic subscribers get ready (they are launched below).
+  - sleep 1
+  - # Remember, everything runs concurrently by default, but this join statement waits for the sleep to exit.
 
   # Launch the demo app.
   - main=:
@@ -72,5 +73,11 @@ main=:
 - yakut subscribe uavcan.diagnostic.Record.1.1
 - yakut --format=json subscribe --no-metadata 2346:uavcan.si.sample.temperature.Scalar.1.0
 
-- ?=: test -n "$STOP_AFTER"   # Exit automatically if STOP_AFTER is defined (frankly, this is just a testing aid).
+# Above you can see that the serial transport is configured in the TCP tunnel mode via endpoint 'localhost:50905'.
+# The transport will fail to initialize unless a broker is available there, so we launch it.
+# If you don't have ncat installed, you can just remove this line and replace the serial port config above with 'null'.
+- ncat --broker --listen --source-port 50905
+
+# Exit automatically if STOP_AFTER is defined (frankly, this is just a testing aid, feel free to ignore).
+- ?=: test -n "$STOP_AFTER"
   main=: sleep $STOP_AFTER && exit 111

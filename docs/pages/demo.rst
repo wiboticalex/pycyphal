@@ -116,7 +116,7 @@ We could write another script for that using PyUAVCAN, but in this section we wi
 How to use Yakut
 ++++++++++++++++
 
-If you don't have Yakut installed on your system yet, do it now by following its documentation.
+If you don't have Yakut installed on your system yet, install it now by following its documentation.
 
 Yakut requires us to compile our DSDL namespaces beforehand using ``yakut compile`` (update paths as necessary):
 
@@ -134,7 +134,7 @@ We can specify any other address with prefix 127.9 for Yakut; for instance:
 
 ..  code-block:: sh
 
-    export YAKUT_TRANSPORT="UDP('127.9.0.111')"
+    export UAVCAN__UDP__IP__STRING=127.9.0.0
 
 Again, if you are using PowerShell on Windows, replace ``export`` with ``$env:``.
 Further snippets will not include this remark.
@@ -147,12 +147,12 @@ To listen to the demo's heartbeat and diagnostics, run the following commands in
 
 ..  code-block:: sh
 
-    export YAKUT_TRANSPORT="UDP('127.9.0.111')"
+    export UAVCAN__UDP__IP__STRING=127.9.0.0
     yakut sub uavcan.node.Heartbeat.1.0     # You should see heartbeats being printed continuously.
 
 ..  code-block:: sh
 
-    export YAKUT_TRANSPORT="UDP('127.9.0.111')"
+    export UAVCAN__UDP__IP__STRING=127.9.0.0
     yakut sub uavcan.diagnostic.Record.1.1  # This one will not show anything yet -- read on.
 
 Now we can actually see how the simple thermostat node is operating.
@@ -160,17 +160,17 @@ Add another subscriber to see the published voltage command:
 
 ..  code-block:: sh
 
-    export YAKUT_TRANSPORT="UDP('127.9.0.111')"
+    export UAVCAN__UDP__IP__STRING=127.9.0.0
     yakut sub -M 2347:uavcan.si.unit.voltage.Scalar.1.0
 
 And publish the setpoint along with measurement (process variable):
 
 ..  code-block:: sh
 
-    export YAKUT_TRANSPORT="UDP('127.9.0.111')"
-    yakut pub 2345:uavcan.si.unit.temperature.Scalar.1.0   'kelvin: 250' \
-              2346:uavcan.si.sample.temperature.Scalar.1.0 'kelvin: 240' \
-              -N10                                                          # Repeat 10 times
+    export UAVCAN__UDP__IP__STRING=127.9.0.0
+    export UAVCAN__NODE__ID__NATURAL16=111    # We need a node-ID to publish messages
+    yakut pub --count 10 2345:uavcan.si.unit.temperature.Scalar.1.0   'kelvin: 250' \
+                         2346:uavcan.si.sample.temperature.Scalar.1.0 'kelvin: 240'
 
 You should see the voltage subscriber (subject-ID 2347) print something along these lines:
 
@@ -261,26 +261,16 @@ The response should look like:
 And the diagnostic subscriber we started in the beginning should print a log record.
 
 
-Building a network
-------------------
-
-In this section we will introduce an additional node that will simulate the controlled plant.
-
-TODO
-
-.. literalinclude:: /../demo/plant.py
-   :linenos:
-
-
 Orchestration
 -------------
 
 ..  important::
 
-    Yakut Orchestrator is in an alpha preview stage.
+    Yakut Orchestrator is in the alpha stage.
     Breaking changes may be introduced between minor versions until Yakut v1.0 is released.
+    Freeze the minor version number to avoid application breakage.
 
-    Yakut Orchestrator does not support Windows currently.
+    Yakut Orchestrator does not support Windows at the moment.
 
 Manual management of environment variables and node processes may work in simple setups, but it doesn't really scale.
 Practical cyber-physical systems require a better way of managing UAVCAN networks that may simultaneously include
@@ -288,23 +278,52 @@ software nodes executed on the local or remote computers along with specialized 
 dedicated hardware.
 
 One solution to this is Yakut Orchestrator --- an interpreter of a simple YAML-based domain-specific language
-that allows one to define process groups and manage them atomically.
+that allows one to define process groups and conveniently manage them as a single entity.
 The language has first-class support for registers --- instead of relying on environment variables,
 one can define registers using a human-friendly syntax without the need to explicitly specify their types
-(the tool will deduce the correct types automatically).
+(the tool will deduce the correct types automatically in most cases).
 
-Here's an example orchestration file (orc-file) ``launch.orc.yaml``:
+Those familiar with ROS may find the tooling described here somewhat similar to *roslaunch*.
+
+
+Second application
+++++++++++++++++++
+
+To make this section more hands-on, we are going to add another application and make it interoperate with the first one.
+As the first application implements a basic thermostat, the second one simulates the plant whose temperature is
+controlled by the thermostat.
+
+.. literalinclude:: /../demo/plant.py
+   :linenos:
+
+
+Writing the orc-file
+++++++++++++++++++++
+
+The following orchestration file (orc-file) ``launch.orc.yaml`` does the following:
+
+- Transpiles two DSDL namespaces: the standard ``uavcan`` and the custom ``sirius_cyber_corp``.
+  If they are already compiled, this step is skipped.
+
+- When compilation is done, the two applications are launched.
+
+- Aside from the applications, a couple of diagnostic processes are started as well.
+  A setpoint publisher will command the thermostat to drive the plant to the specified temperature.
+
+The first process to fail (that is, exit with a non-zero code) will bring down the entire *composition*.
+Processes that run in the conditional/optional script ``?=`` are allowed to fail though.
+
+The syntax allows the developer to define regular environment variables along with register names.
+The latter are translated into environment variables when starting a process.
 
 .. literalinclude:: /../demo/launch.orc.yaml
    :linenos:
    :language: yaml
 
-Those familiar with ROS may find it somewhat similar to *roslaunch*.
-
 The orc-file can be executed as ``yakut orc launch.orc.yaml``, or simply ``./launch.orc.yaml``
 (use ``--verbose`` to see which environment variables are passed to each launched process).
-Having started it, execute the setpoint & measurement publication command introduced earlier,
-and you should see the following output appear in the terminal:
+Having started it, you should see roughly the following output appear in the terminal,
+indicating that the thermostat is working on bringing the plant to the specified temperature:
 
 ..  code-block:: yaml
 
@@ -312,25 +331,28 @@ and you should see the following output appear in the terminal:
     8184:
       _metadata_:
         timestamp:
-          system: 1613597110.155263
-          monotonic: 1149486.479633
+          system: 1613884102.739300
+          monotonic: 1436479.063671
         priority: optional
         transfer_id: 0
         source_node_id: 42
       timestamp:
-        microsecond: 1613597110154721
+        microsecond: 1613884102737854
       severity:
         value: 2
       text: 'root: Application started with PID gains: 0.100 0.000 0.000'
 
-    ---
-    2347:
-      volt: 1.1999999284744263
+    {"2346":{"timestamp":{"microsecond":1613884103226177},"kelvin":300.0}}
+    {"2346":{"timestamp":{"microsecond":1613884103726658},"kelvin":300.0}}
+    {"2346":{"timestamp":{"microsecond":1613884104227063},"kelvin":300.2437438964844}}
+    {"2346":{"timestamp":{"microsecond":1613884104725558},"kelvin":300.480224609375}}
+    {"2346":{"timestamp":{"microsecond":1613884105226489},"kelvin":300.7096252441406}}
+    {"2346":{"timestamp":{"microsecond":1613884105725577},"kelvin":300.9321594238281}}
+    # And so on. Notice that the temperature is rising slowly towards the setpoint at 350 K!
 
-    ---
-    2347:
-      volt: 1.1999999284744263
+As an exercise, try running the same composition over CAN by changing the transport configuration registers
+at the top of the orc-file.
+The full set of transport-related registers is documented at :func:`pyuavcan.application.make_transport`.
 
-    # And so on...
-
-For more info about this tool refer to the Yakut documentation.
+Use Wireshark (capture filter expression: ``(udp or igmp) and src net 127.9.0.0/16``)
+or candump (like ``candump -decaxta any``) to inspect the network exchange.

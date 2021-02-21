@@ -169,12 +169,7 @@ def demo(session):
             shutil.copy(s, tmp_dir)
 
     session.env["STOP_AFTER"] = "10"
-
-    proc_broker = subprocess.Popen(["ncat", "--broker", "--listen", "-p", "50905"])
-    try:
-        session.run("yakut", "orc", "launch.orc.yaml", success_codes=[111])
-    finally:
-        proc_broker.terminate()
+    session.run("yakut", "orc", "launch.orc.yaml", success_codes=[111])
 
 
 @nox.session(python=PYTHONS)
