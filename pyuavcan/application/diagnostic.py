@@ -113,7 +113,7 @@ class DiagnosticPublisher(logging.Handler):
     so that you don't have to hard-code behaviors in the application sources:
 
     >>> from pyuavcan.application.register import Value, Natural16, Bit
-    >>> node = make_node(NodeInfo(), transport=LoopbackTransport(1), defaults={
+    >>> node = make_node(NodeInfo(), transport=LoopbackTransport(1), schema={
     ...     "uavcan.diagnostic.severity": Value(natural16=Natural16([2])),
     ...     "uavcan.diagnostic.timestamp": Value(bit=Bit([True])),
     ... }, ignore_environment_variables=True)

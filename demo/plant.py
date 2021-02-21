@@ -39,13 +39,13 @@ async def main() -> None:
     node = make_node(
         NodeInfo(name="org.uavcan.pyuavcan.demo.plant"),
         "plant.db",
-        defaults={
+        schema={
             "model.environment.temperature": register.Value(real32=register.Real32([292.15])),  # [kelvin]
         },
     )
     with node:
         # Expose internal states for diagnostics.
-        node.create_register("status.saturation", lambda: register.Value(bit=register.Bit([saturation])))
+        node.new_register("status.saturation", lambda: register.Value(bit=register.Bit([saturation])))
 
         # Initialize the defaults from the registry.
         temp_environment = float(node.registry["model.environment.temperature"])

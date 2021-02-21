@@ -63,7 +63,7 @@ class DefaultNode(Node):
     def registry(self) -> register.Registry:
         return self._registry
 
-    def create_register(
+    def new_register(
         self,
         name: str,
         value_or_getter_or_getter_setter: Union[
@@ -75,12 +75,7 @@ class DefaultNode(Node):
                 Callable[[register.Value], None],
             ],
         ],
-        overwrite: bool = False,
     ) -> None:
-        if not overwrite and self.registry.get(name) is not None:
-            _logger.debug("%r: Register %r already exists and overwrite not enabled", self, name)
-            return
-
         def strictify(x: Union[register.Value, register.ValueProxy]) -> register.Value:
             if isinstance(x, register.ValueProxy):
                 return x.value
@@ -102,7 +97,7 @@ class DefaultNode(Node):
 def make_node(
     info: NodeInfo,
     register_file: Union[None, str, Path] = None,
-    defaults: Optional[Mapping[str, Union[register.ValueProxy, register.Value]]] = None,
+    schema: Optional[Mapping[str, Union[register.ValueProxy, register.Value]]] = None,
     *,
     ignore_environment_variables: bool = False,
     transport: Optional[pyuavcan.transport.Transport] = None,
@@ -115,8 +110,8 @@ def make_node(
     If not given, a new transport instance will be constructed using :func:`make_transport`.
 
     Prior to construction, the register file will be updated/extended based on the register values passed via the
-    environment variables (if any) and the explicit ``defaults``.
-    Environment variables and ``defaults`` that encode empty-valued registers trigger removal of such registers
+    environment variables (if any) and the explicit ``schema``.
+    Environment variables and ``schema`` that encode empty-valued registers trigger removal of such registers
     from the file (non-existent registers do not trigger an error).
 
     Register removal is useful, in particular, when the node needs to be switched from one transport type to another
@@ -176,18 +171,20 @@ def make_node(
         the configuration file of this application/node.
         If not provided (default), the registers of this instance will be stored in-memory (volatile configuration).
         If path is provided but the file does not exist, it will be created automatically.
-        See :attr:`Node.registry`, :meth:`Node.create_register`.
+        See :attr:`Node.registry`, :meth:`Node.new_register`.
 
-    :param defaults:
+    :param schema:
         These values will be checked before the environment variables are parsed (unless disabled)
         to make sure that every register specified here exists in the register file with the specified type.
-        Existing registers will be kept as-is, whereas missing ones will be created with the specified default value.
+
+        Existing registers of matching type will be kept unchanged.
+        Existing registers of a different type will be type-converted to the specified type.
+        Missing registers will be created.
+
         Empty values trigger removal of corresponding registers from the register file.
 
-        Use this to define the register schema for the node. Unlike :meth:`Node.create_register`,
-        this approach guarantees that the registers will be created with the correct types specified by the application.
-
-        Do not use this feature for setting default node-ID or port-IDs.
+        Use this parameter to define the register schema of the node.
+        Do not use it for setting default node-ID or port-IDs.
 
     :param ignore_environment_variables:
         If False (default), the register values passed via environment variables will be automatically parsed
@@ -220,7 +217,7 @@ def make_node(
 
         Until this is implemented, to run the allocator one needs to construct the transport manually using
         :func:`make_transport`, then run the allocation client, then invoke this factory again with something like
-        ``defaults={"uavcan.node.id": Value(natural16=Natural16([your_allocated_node_id]))}``.
+        ``schema={"uavcan.node.id": Value(natural16=Natural16([your_allocated_node_id]))}``.
 
         While tedious, this is not that much of a problem because the PnP protocol is mostly intended for
         hardware nodes rather than software ones.
@@ -245,7 +242,7 @@ def make_node(
     db = SQLiteBackend(register_file or "")
     try:
         # Apply defaults first to ensure that new registers are created with the correct types before envs are applied.
-        _apply_defaults(db, defaults or {})
+        _apply_schema(db, schema or {})
         if not ignore_environment_variables:
             _apply_env_vars(db)
 
@@ -285,23 +282,11 @@ def make_node(
     return node
 
 
-def _apply_env_vars(db: SQLiteBackend) -> None:
-    for name, value in register.parse_environment_variables().items():
-        value = register.ValueProxy(value).value
-        _logger.debug("Register init from env var: %r <-- %r", name, value)
-        if value.empty:  # Remove register under this name.
-            try:
-                del db[name]
-            except LookupError:
-                pass
-        else:
-            db[name] = value
-
-
-def _apply_defaults(db: SQLiteBackend, defaults: Mapping[str, Union[register.ValueProxy, register.Value]]) -> None:
-    for name, value in defaults.items():
-        value = register.ValueProxy(value).value
-        if value.empty:  # Remove register under this name.
+def _apply_schema(db: SQLiteBackend, schema: Mapping[str, Union[register.ValueProxy, register.Value]]) -> None:
+    for name, value in schema.items():
+        _logger.debug("Register init from schema: %r <-- %r", name, value)
+        value = register.ValueProxy(value)
+        if value.value.empty:  # Remove register under this name.
             try:
                 del db[name]
             except LookupError:
@@ -309,7 +294,30 @@ def _apply_defaults(db: SQLiteBackend, defaults: Mapping[str, Union[register.Val
         else:
             existing = db.get(name)
             if existing is None or existing.value.empty:
+                mutable = True
+            else:
+                value.assign(existing.value)  # Perform type conversion to match expectations of the application.
+                mutable = existing.mutable
+            db[name] = register.backend.Entry(value.value, mutable=mutable)
+
+
+def _apply_env_vars(db: SQLiteBackend) -> None:
+    for name, value in register.parse_environment_variables().items():
+        _logger.debug("Register init from env var: %r <-- %r", name, value)
+        if value.empty:  # Remove register under this name.
+            try:
+                del db[name]
+            except LookupError:
+                pass
+        else:
+            try:
+                existing = db[name]
+            except LookupError:
                 db[name] = value
+            else:  # Force to the correct type.
+                converted = register.ValueProxy(existing.value)
+                converted.assign(value)
+                db[name] = register.backend.Entry(converted.value, mutable=existing.mutable)
 
 
 def _make_diagnostic_publisher(node: Node) -> None:

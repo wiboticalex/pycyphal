@@ -188,23 +188,13 @@ would circumvent the introspection services.
 The node instance also implements the register network service (``uavcan.register.Access``, ``uavcan.register.List``)
 so other network participants can access the registry of the local node and reconfigure it.
 The application can also do that locally, of course.
-New registers can be created using :meth:`Node.create_register`:
+New registers can be created in two ways: by passing defaults to :func:`make_node` (will be shown later),
+and via :meth:`Node.new_register` like so:
 
 >>> from pyuavcan.application.register import Value, Real64  # Convenience aliases for uavcan.register.Value, etc.
->>> node.create_register("my_application.pid_gains", Value(real64=Real64([1.15, 0.8, 0.03])))
->>> node.registry["my_application.pid_gains"].floats
-[1.15, 0.8, 0.03]
->>> node.registry["my_application.pid_gains"] = 2, 1, 0.05  # Registers are strongly typed; conversion is automatic.
->>> node.registry["my_application.pid_gains"].floats
-[2.0, 1.0, 0.05]
-
-The above shows a regular register that is stored in the register file.
-It is often useful to have dynamic registers that are never stored but computed at every invocation
-(like performance counters, diagnostics, real-time process variables, etc.):
-
 >>> import numpy as np
->>> node.create_register("my_application.estimator.state_vector",
-...                      lambda: Value(real64=Real64(np.random.random((4, 1)).flatten())))
+>>> node.new_register("my_application.estimator.state_vector",      # Not stored, but computed at every invocation
+...                   lambda: Value(real64=Real64(np.random.random((4, 1)).flatten())))
 >>> node.registry["my_application.estimator.state_vector"].floats   # Some random things.
 [..., ..., ..., ...]
 
@@ -234,9 +224,13 @@ There are three places:
 
   When the environment variables are parsed, the values stored in the register file are automatically updated.
 
-- **Default registers.**
-  The application can pass default register values to ensure that specific registers are created even if they are not
-  passed via environment variables and are not already present in the register file.
+- **The schema definition (default values).**
+  The application can pass default register values to ensure that the register file contains them and that they are
+  of the correct type.
+  The defaults are created before the environment variables are parsed to ensure that the registers are of the
+  type defined by the application.
+  Registers that already exist in the file under a wrong type are automatically converted to
+  the correct type defined in the schema.
   Do not use this feature for setting default node-ID or port-IDs.
 
 ..  doctest::
@@ -248,6 +242,7 @@ There are three places:
     >>> os.environ["UAVCAN__SUB__OPTIONAL_PORT__ID__NATURAL16"]     = "65535"
     >>> os.environ["UAVCAN__UDP__IP__STRING"]                       = "127.63.0.0"
     >>> os.environ["UAVCAN__SERIAL__PORT__STRING"]                  = "socket://localhost:50905"
+    >>> os.environ["UAVCAN__DIAGNOSTIC__SEVERITY__REAL64"]          = "3.1"
     >>> os.environ["M__MOTOR__INDUCTANCE_DQ__REAL64"]               = "0.12 0.13"
 
 >>> import os
@@ -259,12 +254,14 @@ UAVCAN__PUB__MEASURED_VOLTAGE__ID__NATURAL16    6543
 UAVCAN__SUB__OPTIONAL_PORT__ID__NATURAL16       65535
 UAVCAN__UDP__IP__STRING                         127.63.0.0
 UAVCAN__SERIAL__PORT__STRING                    socket://localhost:50905
+UAVCAN__DIAGNOSTIC__SEVERITY__REAL64            3.1
 M__MOTOR__INDUCTANCE_DQ__REAL64                 0.12 0.13
 >>> node = pyuavcan.application.make_node(
 ...     node_info,
 ...     "registers.db",     # The file will be created if doesn't exist.
-...     defaults={          # Configure default logging severity.
+...     schema={          # Configure default logging severity and a custom register.
 ...         "uavcan.diagnostic.severity": Value(natural16=pyuavcan.application.register.Natural16([2])),
+...         "custom.register": Value(real64=pyuavcan.application.register.Real64([1.23, -8.15])),
 ...     },
 ... )
 >>> node.id
@@ -275,12 +272,29 @@ RedundantTransport(UDPTransport('127.63.0.42', ...), SerialTransport('socket://l
 >>> pub_voltage.port_id
 6543
 >>> pub_voltage.close()
+>>> list(node.registry["uavcan.diagnostic.severity"].value.natural16.value)     # Type automatically converted.
+[3]
+>>> node.registry["custom.register"].floats         # Default values.
+[1.23, -8.15]
 >>> node.registry["m.motor.inductance_dq"].floats   # Application parameters.
 [0.12, 0.13]
 >>> node.make_subscriber(uavcan.si.unit.voltage.Scalar_1_0, "optional_port")  # doctest: +IGNORE_EXCEPTION_DETAIL
 Traceback (most recent call last):
 ...
 MissingRegisterError: 'uavcan.sub.optional_port.id'
+>>> node.close()
+
+As mentioned above, when the schema type is changed, existing values are type-converted automatlcally:
+
+>>> node = pyuavcan.application.make_node(
+...     node_info,
+...     "registers.db",     # The file was just created above.
+...     schema={            # Notice that the type is now different!
+...         "custom.register": Value(integer8=pyuavcan.application.register.Integer8([99, -88])),
+...     },
+... )
+>>> node.registry["custom.register"].floats     # The old values are used but the type is now integer8.
+[1.0, -8.0]
 
 ..  doctest::
     :hide:
@@ -288,6 +302,7 @@ MissingRegisterError: 'uavcan.sub.optional_port.id'
     >>> for k in os.environ:
     ...     if "__" in k:
     ...         del os.environ[k]
+    >>> node.close()
 
 Naturally, in order to launch a node one would need to export the required environment variables.
 While this can be done trivially using a shell script or something similar,

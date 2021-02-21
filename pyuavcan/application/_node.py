@@ -20,10 +20,6 @@ MessageClass = TypeVar("MessageClass", bound=pyuavcan.dsdl.CompositeObject)
 ServiceClass = TypeVar("ServiceClass", bound=pyuavcan.dsdl.ServiceObject)
 
 
-class MissingPortConfigurationError(register.MissingRegisterError):
-    pass
-
-
 class Node(abc.ABC):
     """
     This is the top-level abstraction representing a UAVCAN node on the bus.
@@ -92,14 +88,14 @@ class Node(abc.ABC):
         and application-specific ones.
 
         Note that it is not possible to create new registers using this interface;
-        for that, see :meth:`create_register`.
+        for that, see :func:`pyuavcan.application.make_node` and :meth:`new_register`.
 
         See also :meth:`make_publisher`, :meth:`make_subscriber`, :meth:`make_client`, :meth:`get_server`.
         """
         raise NotImplementedError
 
     @abc.abstractmethod
-    def create_register(
+    def new_register(
         self,
         name: str,
         value_or_getter_or_getter_setter: Union[
@@ -111,10 +107,9 @@ class Node(abc.ABC):
                 Callable[[register.Value], None],
             ],
         ],
-        overwrite: bool = False,
     ) -> None:
         """
-        Create a new register (define register schema).
+        Create a new register, overwrite existing. See also: :func:`pyuavcan.application.make_node`.
 
         :param name: The name of the register.
 
@@ -133,11 +128,6 @@ class Node(abc.ABC):
               is returned by the getter.
               The type conversion is performed automatically by polling the getter beforehand to discover the type.
               The registry file is not affected and therefore this change is not persistent.
-
-        :param overwrite:
-            By default, if the register under the specified name already exists, nothing will be done.
-            This behavior can be changed by setting this flag to True, which will cause the register to be
-            unconditionally overwritten even if the type is different (no type conversion will take place).
         """
         raise NotImplementedError
 
@@ -235,12 +225,10 @@ class Node(abc.ABC):
         except register.MissingRegisterError:
             # Since we have a name, we want this port to be reconfigurable, so we ensure the register exists.
             port_id = 0xFFFF  # Per Specification, this value stands for uninitialized/disabled port.
-            self.create_register(id_register_name, register.Value(natural16=register.Natural16([port_id])))
+            self.new_register(id_register_name, register.Value(natural16=register.Natural16([port_id])))
 
         # Expose the type information to other network participants as prescribed by the Specification.
-        self.create_register(
-            f"uavcan.{kind}.{name}.type", lambda: register.Value(string=register.String(str(model))), overwrite=True
-        )
+        self.new_register(f"uavcan.{kind}.{name}.type", lambda: register.Value(string=register.String(str(model))))
 
         # Check if the value stored in the register is actually valid.
         mask = {
@@ -258,7 +246,7 @@ class Node(abc.ABC):
             assert isinstance(model.fixed_port_id, int)
             return model.fixed_port_id
 
-        raise MissingPortConfigurationError(
+        raise register.MissingRegisterError(
             id_register_name,
             f"Cannot initialize {kind}-port {name!r} because the register "
             f"does not define a valid port-ID and no fixed port-ID is defined for {model}. "

@@ -29,7 +29,7 @@ class RegisterServer:
     >>> from pyuavcan.transport.loopback import LoopbackTransport
     >>> from pyuavcan.application.register import Registry, Value, ValueProxy, Integer64, Real16, Unstructured
     >>> node = pyuavcan.application.make_node(pyuavcan.application.NodeInfo(), transport=LoopbackTransport(1))
-    >>> node.create_register("foo", Value(integer64=Integer64([1, 20, -100])))
+    >>> node.new_register("foo", Value(integer64=Integer64([1, 20, -100])))
     >>> node.registry["foo"].ints               # Yup, the registry is set up with our dummy register.
     [1, 20, -100]
     >>> node.start()

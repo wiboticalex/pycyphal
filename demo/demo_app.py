@@ -52,6 +52,8 @@ class DemoApplication:
     """
 
     def __init__(self) -> None:
+        from pyuavcan.application.register import Value, Real32
+
         node_info = uavcan.node.GetInfo_1_0.Response(
             software_version=uavcan.node.Version_1_0(major=1, minor=0),
             name="org.uavcan.pyuavcan.demo.demo_app",
@@ -62,7 +64,13 @@ class DemoApplication:
         # The file "my_registers.db" stores the registers of our node (see DSDL namespace uavcan.register).
         # This is optional though; if the application does not require persistent states, this parameter may be omitted,
         # in which case the register file will be stored in-memory.
-        self._node = pyuavcan.application.make_node(node_info, DemoApplication.REGISTER_FILE)
+        self._node = pyuavcan.application.make_node(
+            node_info,
+            DemoApplication.REGISTER_FILE,
+            schema={  # Register types and default values are defined at the initialization stage like so.
+                "thermostat.pid.gains": Value(real32=Real32([0.12, 0.18, 0.01])),
+            },
+        )
 
         # Published heartbeat fields can be configured as follows.
         self._node.heartbeat_publisher.mode = uavcan.node.Mode_1_0.OPERATIONAL  # type: ignore
@@ -93,12 +101,6 @@ class DemoApplication:
         # We don't specify the port name so the service-ID defaults to the fixed port-ID.
         # We could, of course, use it with a different service-ID as well, if needed.
         self._node.get_server(uavcan.node.ExecuteCommand_1_1).serve_in_background(self._serve_execute_command)
-
-        # Initialize the defaults. If the register file was just created, it will be populated with the specified
-        # default values. If it already exists and contains such registers, nothing will be done.
-        from pyuavcan.application.register import Value, Real32
-
-        self._node.create_register("thermostat.pid.gains", Value(real32=Real32([0.12, 0.18, 0.01])))  # Defaults.
 
         self._node.start()  # Don't forget to start the node!
 
@@ -146,8 +148,8 @@ class DemoApplication:
 
         # Expose internal states to external observers for diagnostic purposes. Here, we define read-only registers.
         # Since they are computed at every invocation, they are never stored in the register file.
-        self._node.create_register("thermostat.error", lambda: Value(real32=Real32([temperature_error])))
-        self._node.create_register("thermostat.setpoint", lambda: Value(real32=Real32([temperature_setpoint])))
+        self._node.new_register("thermostat.error", lambda: Value(real32=Real32([temperature_error])))
+        self._node.new_register("thermostat.setpoint", lambda: Value(real32=Real32([temperature_setpoint])))
 
         async def on_setpoint(msg: uavcan.si.unit.temperature.Scalar_1_0, _: pyuavcan.transport.TransferFrom) -> None:
             nonlocal temperature_setpoint
