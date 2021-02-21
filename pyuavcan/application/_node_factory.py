@@ -175,11 +175,14 @@ def make_node(
         See :attr:`Node.registry`, :meth:`Node.create_register`.
 
     :param defaults:
-        These are the default register values.
-        After the environment variables are parsed (unless disabled) and the register file is updated accordingly,
-        these values will be checked to make sure that every register specified here exists in the register file.
+        These values will be checked before the environment variables are parsed (unless disabled)
+        to make sure that every register specified here exists in the register file with the specified type.
         Existing registers will be kept as-is, whereas missing ones will be created with the specified default value.
         Empty values trigger removal of corresponding registers from the register file.
+
+        Use this to define the register schema for the node. Unlike :meth:`Node.create_register`,
+        this approach guarantees that the registers will be created with the correct types specified by the application.
+
         Do not use this feature for setting default node-ID or port-IDs.
 
     :param ignore_environment_variables:
@@ -237,10 +240,10 @@ def make_node(
 
     db = SQLiteBackend(register_file or "")
     try:
+        # Apply defaults first to ensure that new registers are created with the correct types before envs are applied.
+        _apply_defaults(db, defaults or {})
         if not ignore_environment_variables:
             _apply_env_vars(db)
-        if defaults is not None:
-            _apply_defaults(db, defaults)
 
         # Populate certain fields of the node info structure automatically.
         info.protocol_version.major, info.protocol_version.minor = pyuavcan.UAVCAN_SPECIFICATION_VERSION

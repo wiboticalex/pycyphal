@@ -348,7 +348,7 @@ indicating that the thermostat is working on bringing the plant to the specified
     {"2346":{"timestamp":{"microsecond":1613884104725558},"kelvin":300.480224609375}}
     {"2346":{"timestamp":{"microsecond":1613884105226489},"kelvin":300.7096252441406}}
     {"2346":{"timestamp":{"microsecond":1613884105725577},"kelvin":300.9321594238281}}
-    # And so on. Notice that the temperature is rising slowly towards the setpoint at 350 K!
+    # And so on. Notice how the temperature is rising slowly towards the setpoint at 350 K!
 
 As an exercise, try running the same composition over CAN by changing the transport configuration registers
 at the top of the orc-file.

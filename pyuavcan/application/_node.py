@@ -116,7 +116,7 @@ class Node(abc.ABC):
 
         :param value_or_getter_or_getter_setter:
             - If this is a :class:`register.Value` or `register.ValueProxy` (the latter is supported for convenience),
-              the value will be written into the registry file (see constructor).
+              the value will be written into the registry file.
 
             - If this is a callable, it will be invoked whenever this register is read.
               The return type of the callable is either :class:`register.Value` or :class:`register.ValueProxy`.
@@ -131,10 +131,7 @@ class Node(abc.ABC):
               The registry file is not affected and therefore this change is not persistent.
 
         :param overwrite:
-            By default, if the register under the specified name already exists, nothing will be done,
-            which allows applications to define default settings at startup by simply invoking this method for
-            every known register (i.e., configuration parameter).
-
+            By default, if the register under the specified name already exists, nothing will be done.
             This behavior can be changed by setting this flag to True, which will cause the register to be
             unconditionally overwritten even if the type is different (no type conversion will take place).
         """
