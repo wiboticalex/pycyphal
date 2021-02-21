@@ -24,7 +24,7 @@ DESCRIPTION = "A full-featured implementation of the UAVCAN protocol stack in Py
 
 GIT_HASH = subprocess.check_output("git rev-parse HEAD", shell=True).decode().strip()
 
-APIDOC_GENERATED_ROOT = pathlib.Path(".apidoc_generated")
+APIDOC_GENERATED_ROOT = pathlib.Path("api")
 DOC_ROOT = pathlib.Path(__file__).absolute().parent
 REPOSITORY_ROOT = DOC_ROOT.parent
 
