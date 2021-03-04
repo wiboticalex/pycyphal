@@ -208,7 +208,7 @@ class FileServer:
                 if dst.is_dir():
                     shutil.rmtree(dst, ignore_errors=True)
                 else:
-                    dst.unlink(missing_ok=True)
+                    dst.unlink()
 
             # Do move/copy depending on the flag.
             if request.preserve_source:
@@ -217,7 +217,7 @@ class FileServer:
                 else:
                     shutil.copy(src, dst)
             else:
-                shutil.move(src, dst)
+                shutil.move(str(src), str(dst))
             return Modify.Response()
         except Exception as ex:
             _logger.info("%r: Error: %r", self, ex, exc_info=True)
