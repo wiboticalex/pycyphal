@@ -106,7 +106,7 @@ async def _unittest_file(compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInf
         assert not info.is_link
 
         assert (await cln.get_info("a/foo/nothing")).error.value == Error.NOT_FOUND
-        assert await cln.write("a/foo", b"123") == Error.IS_DIRECTORY
+        assert await cln.write("a/foo", b"123") in (Error.IS_DIRECTORY, Error.ACCESS_DENIED)  # Windows compatibility
 
         # Removal
         assert (await cln.remove("a/foo/z")) == Error.NOT_FOUND
