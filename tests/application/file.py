@@ -38,7 +38,7 @@ async def _unittest_file(compiled: typing.List[pyuavcan.dsdl.GeneratedPackageInf
         assert [] == list(file_server.glob("*"))
 
         cln_node.start()
-        cln = FileClient(cln_node, 222, response_timeout=0.5)
+        cln = FileClient(cln_node, 222)
 
         async def ls(path: str) -> typing.List[str]:
             out: typing.List[str] = []
