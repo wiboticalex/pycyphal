@@ -234,7 +234,13 @@ class RedundantInputSession(RedundantSession, pyuavcan.transport.InputSession):
     ) -> None:
         assert self._deduplicator is not None
         iface_id = id(session)
-        if self._deduplicator.should_accept_transfer(iface_id, self.transfer_id_timeout, transfer):
+        if self._deduplicator.should_accept_transfer(
+            iface_id=iface_id,
+            transfer_id_timeout=self.transfer_id_timeout,
+            timestamp=transfer.timestamp,
+            source_node_id=transfer.source_node_id,
+            transfer_id=transfer.transfer_id,
+        ):
             _logger.debug("%s: Accepting %s from %016x", self, transfer, iface_id)
             self._stat_transfers += 1
             self._stat_payload_bytes += sum(map(len, transfer.fragmented_payload))

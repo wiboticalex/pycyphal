@@ -4,14 +4,15 @@
 
 from __future__ import annotations
 import abc
+import typing
 import pyuavcan.transport
 
 
 class Deduplicator(abc.ABC):
     """
     The abstract class implementing the transfer-wise deduplication strategy.
-    It is exposed for use with packet capture and tracing only.
-    Users of redundant transports do not need to deduplicate their transfers manually as it will be done automatically.
+    **Users of redundant transports do not need to deduplicate their transfers manually
+    as it will be done automatically.**
     Please read the module documentation for further details.
     """
 
@@ -40,14 +41,19 @@ class Deduplicator(abc.ABC):
 
     @abc.abstractmethod
     def should_accept_transfer(
-        self, iface_id: int, transfer_id_timeout: float, transfer: pyuavcan.transport.TransferFrom
+        self,
+        iface_id: int,
+        transfer_id_timeout: float,
+        timestamp: pyuavcan.transport.Timestamp,
+        source_node_id: typing.Optional[int],
+        transfer_id: int,
     ) -> bool:
         """
         The iface-ID is an arbitrary integer that is unique within the redundant group identifying the transport
         instance the transfer was received from.
         It could be the index of the redundant interface (e.g., 0, 1, 2 for a triply-redundant transport),
         or it could be something else like a memory address of a related object.
-        Embedded applications usually use indexes, whereas in PyUAVCAN it may be more convenient to use ``id()``.
+        Embedded applications usually use indexes, whereas in PyUAVCAN it may be more convenient to use :func:`id`.
 
         The transfer-ID timeout is specified in seconds. It is used to handle the case of a node restart.
         """
