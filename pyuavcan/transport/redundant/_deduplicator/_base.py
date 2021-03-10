@@ -42,6 +42,7 @@ class Deduplicator(abc.ABC):
     @abc.abstractmethod
     def should_accept_transfer(
         self,
+        *,
         iface_id: int,
         transfer_id_timeout: float,
         timestamp: pyuavcan.transport.Timestamp,

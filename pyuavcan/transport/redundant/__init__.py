@@ -373,6 +373,6 @@ from ._session import RedundantFeedback as RedundantFeedback
 
 from ._error import InconsistentInferiorConfigurationError as InconsistentInferiorConfigurationError
 
-from ._deduplicator import Deduplicator as Deduplicator
-from ._deduplicator import MonotonicDeduplicator as MonotonicDeduplicator
-from ._deduplicator import CyclicDeduplicator as CyclicDeduplicator
+from ._tracer import RedundantCapture as RedundantCapture
+from ._tracer import RedundantDuplicateTransferTrace as RedundantDuplicateTransferTrace
+from ._tracer import RedundantTracer as RedundantTracer

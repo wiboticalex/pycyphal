@@ -10,6 +10,7 @@ import pyuavcan.transport
 from ._session import RedundantInputSession, RedundantOutputSession, RedundantSession
 from ._error import InconsistentInferiorConfigurationError
 from ._deduplicator import Deduplicator
+from ._tracer import RedundantTracer, RedundantCapture
 
 
 _logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class RedundantTransport(pyuavcan.transport.Transport):
         """
         self._cols: typing.List[pyuavcan.transport.Transport] = []
         self._rows: typing.Dict[pyuavcan.transport.SessionSpecifier, RedundantSession] = {}
-        self._capture_handlers: typing.List[pyuavcan.transport.CaptureCallback] = []
+        self._unwrapped_capture_handlers: typing.List[typing.Callable[[RedundantCapture], None]] = []
         self._loop = loop if loop is not None else asyncio.get_event_loop()
         self._check_matrix_consistency()
 
@@ -164,8 +165,6 @@ class RedundantTransport(pyuavcan.transport.Transport):
         the operation will be rolled back to ensure state consistency.
         """
         self._validate_inferior(transport)
-        for ch in self._capture_handlers:
-            transport.begin_capture(ch)
         self._cols.append(transport)
         try:
             for redundant_session in self._rows.values():
@@ -175,6 +174,9 @@ class RedundantTransport(pyuavcan.transport.Transport):
             raise
         finally:
             self._check_matrix_consistency()
+        # Launch the capture as late as possible to not leave it dangling if the attachment failed.
+        for ch in self._unwrapped_capture_handlers:
+            transport.begin_capture(self._wrap_capture_handler(transport, ch))
 
     def detach_inferior(self, transport: pyuavcan.transport.Transport) -> None:
         """
@@ -228,25 +230,28 @@ class RedundantTransport(pyuavcan.transport.Transport):
     def begin_capture(self, handler: pyuavcan.transport.CaptureCallback) -> None:
         """
         Stores the handler in the local list of handlers.
-        Invokes :class:`pyuavcan.transport.Transport.begin_capture` on each inferior with the provided handler.
+        Invokes :class:`pyuavcan.transport.Transport.begin_capture` on each inferior.
         If at least one inferior raises an exception, it is propagated immediately and the remaining inferiors
         will remain in an inconsistent state.
         When a new inferior is added later, the stored handlers will be automatically used to enable capture on it.
         If such auto-restoration behavior is undesirable, configure capture individually per-inferior instead.
 
-        The redundant transport does not define its own capture events and does not wrap captured events reported
-        by its inferiors.
+        Every capture emitted by the inferiors is wrapped into :class:`RedundantCapture`,
+        which contains additional metadata about the inferior transport instance that emitted the capture.
+        This is done to let users understand which transport of the redundant group has
+        provided the capture and also this information is used by :class:`RedundantTracer`
+        to automatically manage transfer deduplication.
         """
-        self._capture_handlers.append(handler)
+        self._unwrapped_capture_handlers.append(handler)
         for c in self._cols:
-            c.begin_capture(handler)
+            c.begin_capture(self._wrap_capture_handler(c, handler))
 
     @staticmethod
-    def make_tracer() -> pyuavcan.transport.Tracer:
+    def make_tracer() -> RedundantTracer:
         """
-        This method is not implemented for redundant transport. Access the inferiors directly instead.
+        See :class:`RedundantTracer`.
         """
-        raise NotImplementedError
+        return RedundantTracer()
 
     async def spoof(self, transfer: pyuavcan.transport.AlienTransfer, monotonic_deadline: float) -> bool:
         """
@@ -256,6 +261,7 @@ class RedundantTransport(pyuavcan.transport.Transport):
         First exception to occur terminates the operation and is raised immediately.
         This is different from regular sending; the assumption is that the caller necessarily wants to ensure
         that spoofing takes place against every inferior.
+        If this is not the case, spoof each inferior separately.
         """
         if not self._cols:
             return False
@@ -358,6 +364,21 @@ class RedundantTransport(pyuavcan.transport.Transport):
     def _check_matrix_consistency(self) -> None:
         for row in self._rows.values():
             assert len(row.inferiors) == len(self._cols)
+
+    def _wrap_capture_handler(
+        self,
+        inferior: pyuavcan.transport.Transport,
+        handler: typing.Callable[[RedundantCapture], None],
+    ) -> pyuavcan.transport.CaptureCallback:
+        # If you are reading this, send me a postcard.
+        return lambda cap: handler(
+            RedundantCapture(
+                cap.timestamp,
+                inferior=cap,
+                iface_id=id(inferior),
+                transfer_id_modulo=self.protocol_parameters.transfer_id_modulo,  # THIS IS PROBABLY SLOW?
+            )
+        )
 
     def _get_repr_fields(self) -> typing.Tuple[typing.List[typing.Any], typing.Dict[str, typing.Any]]:
         return list(self.inferiors), {}

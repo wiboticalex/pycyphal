@@ -312,11 +312,11 @@ def _unittest_redundant_transport_capture() -> None:
     assert inf_a.capture_handlers == []
     assert inf_b.capture_handlers == []
     tr.attach_inferior(inf_a)
-    assert inf_a.capture_handlers == [mon]
+    assert len(inf_a.capture_handlers) == 1
     assert inf_b.capture_handlers == []
     tr.attach_inferior(inf_b)
-    assert inf_a.capture_handlers == [mon]
-    assert inf_b.capture_handlers == [mon]
+    assert len(inf_a.capture_handlers) == 1
+    assert len(inf_b.capture_handlers) == 1
 
 
 def _unittest_redundant_transport_reconfiguration() -> None:
