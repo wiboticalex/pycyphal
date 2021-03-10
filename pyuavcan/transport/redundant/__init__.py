@@ -372,3 +372,7 @@ from ._session import RedundantSessionStatistics as RedundantSessionStatistics
 from ._session import RedundantFeedback as RedundantFeedback
 
 from ._error import InconsistentInferiorConfigurationError as InconsistentInferiorConfigurationError
+
+from ._deduplicator import Deduplicator as Deduplicator
+from ._deduplicator import MonotonicDeduplicator as MonotonicDeduplicator
+from ._deduplicator import CyclicDeduplicator as CyclicDeduplicator

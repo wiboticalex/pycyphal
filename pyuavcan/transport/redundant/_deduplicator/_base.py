@@ -2,11 +2,42 @@
 # This software is distributed under the terms of the MIT License.
 # Author: Pavel Kirienko <pavel@uavcan.org>
 
+from __future__ import annotations
 import abc
 import pyuavcan.transport
 
 
 class Deduplicator(abc.ABC):
+    """
+    The abstract class implementing the transfer-wise deduplication strategy.
+    It is exposed for use with packet capture and tracing only.
+    Users of redundant transports do not need to deduplicate their transfers manually as it will be done automatically.
+    Please read the module documentation for further details.
+    """
+
+    MONOTONIC_TRANSFER_ID_MODULO_THRESHOLD = int(2 ** 48)
+    """
+    An inferior transport whose transfer-ID modulo is less than this value is expected to experience
+    transfer-ID overflows routinely during its operation. Otherwise, the transfer-ID is not expected to
+    overflow for centuries.
+
+    A transfer-ID counter that is expected to overflow is called "cyclic", otherwise it's "monotonic".
+    Read https://forum.uavcan.org/t/alternative-transport-protocols/324.
+    See :meth:`new`.
+    """
+
+    @staticmethod
+    def new(transfer_id_modulo: int) -> Deduplicator:
+        """
+        A helper factory that constructs a :class:`MonotonicDeduplicator` if the argument is not less than
+        :attr:`MONOTONIC_TRANSFER_ID_MODULO_THRESHOLD`, otherwise constructs a :class:`CyclicDeduplicator`.
+        """
+        from . import CyclicDeduplicator, MonotonicDeduplicator
+
+        if transfer_id_modulo >= Deduplicator.MONOTONIC_TRANSFER_ID_MODULO_THRESHOLD:
+            return MonotonicDeduplicator()
+        return CyclicDeduplicator(transfer_id_modulo)
+
     @abc.abstractmethod
     def should_accept_transfer(
         self, iface_id: int, transfer_id_timeout: float, transfer: pyuavcan.transport.TransferFrom

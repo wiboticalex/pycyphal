@@ -9,6 +9,7 @@ import dataclasses
 import pyuavcan.transport
 from ._session import RedundantInputSession, RedundantOutputSession, RedundantSession
 from ._error import InconsistentInferiorConfigurationError
+from ._deduplicator import Deduplicator
 
 
 _logger = logging.getLogger(__name__)
@@ -31,15 +32,6 @@ class RedundantTransport(pyuavcan.transport.Transport):
     """
     This is a composite over a set of :class:`pyuavcan.transport.Transport`.
     Please read the module documentation for details.
-    """
-
-    MONOTONIC_TRANSFER_ID_MODULO_THRESHOLD = int(2 ** 48)
-    """
-    An inferior transport whose transfer-ID modulo is less than this value is expected to experience
-    transfer-ID overflows routinely during its operation. Otherwise, the transfer-ID is not expected to
-    overflow for centuries.
-    A transfer-ID counter that is expected to overflow is called "cyclic", otherwise it's "monotonic".
-    Read https://forum.uavcan.org/t/alternative-transport-protocols/324.
     """
 
     def __init__(self, *, loop: typing.Optional[asyncio.AbstractEventLoop] = None) -> None:
@@ -112,7 +104,9 @@ class RedundantTransport(pyuavcan.transport.Transport):
     ) -> RedundantInputSession:
         out = self._get_session(
             specifier,
-            lambda fin: RedundantInputSession(specifier, payload_metadata, self._get_tid_modulo, self._loop, fin),
+            lambda fin: RedundantInputSession(
+                specifier, payload_metadata, lambda: self.protocol_parameters.transfer_id_modulo, self._loop, fin
+            ),
         )
         assert isinstance(out, RedundantInputSession)
         self._check_matrix_consistency()
@@ -297,8 +291,11 @@ class RedundantTransport(pyuavcan.transport.Transport):
                 )
 
             # Ensure all inferiors use the same transfer-ID overflow policy.
-            if self._get_tid_modulo() is None:
-                if transport.protocol_parameters.transfer_id_modulo < self.MONOTONIC_TRANSFER_ID_MODULO_THRESHOLD:
+            if self.protocol_parameters.transfer_id_modulo >= Deduplicator.MONOTONIC_TRANSFER_ID_MODULO_THRESHOLD:
+                if (
+                    transport.protocol_parameters.transfer_id_modulo
+                    < Deduplicator.MONOTONIC_TRANSFER_ID_MODULO_THRESHOLD
+                ):
                     raise InconsistentInferiorConfigurationError(
                         f"The new inferior shall use monotonic transfer-ID counters in order to match the "
                         f"other inferiors in the redundant transport group"
@@ -357,11 +354,6 @@ class RedundantTransport(pyuavcan.transport.Transport):
             # If the inferior has not been added, this method will have no effect:
             owner._close_inferior(new_index)  # pylint: disable=protected-access
             raise
-
-    def _get_tid_modulo(self) -> typing.Optional[int]:
-        if self.protocol_parameters.transfer_id_modulo < self.MONOTONIC_TRANSFER_ID_MODULO_THRESHOLD:
-            return self.protocol_parameters.transfer_id_modulo
-        return None
 
     def _check_matrix_consistency(self) -> None:
         for row in self._rows.values():
