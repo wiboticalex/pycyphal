@@ -268,6 +268,10 @@ class SerialTransport(pyuavcan.transport.Transport):
         """
         self._capture_handlers.append(handler)
 
+    @property
+    def capture_active(self) -> bool:
+        return len(self._capture_handlers) > 0
+
     @staticmethod
     def make_tracer() -> SerialTracer:
         """

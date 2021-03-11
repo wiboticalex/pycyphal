@@ -246,6 +246,10 @@ class RedundantTransport(pyuavcan.transport.Transport):
         for c in self._cols:
             c.begin_capture(self._wrap_capture_handler(c, handler))
 
+    @property
+    def capture_active(self) -> bool:
+        return len(self._unwrapped_capture_handlers) > 0
+
     @staticmethod
     def make_tracer() -> RedundantTracer:
         """

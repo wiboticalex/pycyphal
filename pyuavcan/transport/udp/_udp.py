@@ -292,6 +292,10 @@ class UDPTransport(pyuavcan.transport.Transport):
             self._sniffer = self._sock_factory.make_sniffer(self._process_capture)
         self._capture_handlers.append(handler)
 
+    @property
+    def capture_active(self) -> bool:
+        return self._sniffer is not None
+
     @staticmethod
     def make_tracer() -> UDPTracer:
         """

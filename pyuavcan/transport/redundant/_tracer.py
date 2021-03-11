@@ -76,24 +76,27 @@ class RedundantTracer(pyuavcan.transport.Tracer):
         duplicates are simply dropped and :class:`RedundantDuplicateTransferTrace` is returned.
         All other instances (such as :class:`pyuavcan.transport.ErrorTrace`) are returned unchanged.
         """
-        _logger.debug("%r: Processing %r", cap)
+        _logger.debug("%r: Processing %r", self, cap)
         if not isinstance(cap, RedundantCapture):
             return None
 
         if cap.transfer_id_modulo != self._last_transfer_id_modulo:
             _logger.info(
-                "%r: TID modulo change detected, resetting deduplication state (%d deduplicators dropped): %r --> %r",
+                "%r: TID modulo change detected, resetting state (%d deduplicators dropped): %r --> %r",
+                self,
                 len(self._deduplicators),
                 self._last_transfer_id_modulo,
                 cap.transfer_id_modulo,
             )
+            # Should we also drop the tracers here? If an inferior transport is removed its tracer will be sitting
+            # here useless, we don't want that. But on the other hand, disturbing the state too much is also no good.
             self._last_transfer_id_modulo = cap.transfer_id_modulo
             self._deduplicators.clear()
 
         tracer = self._get_inferior_tracer(cap.inferior.get_transport_type(), cap.iface_id)
         trace = tracer.update(cap.inferior)
         if not isinstance(trace, pyuavcan.transport.TransferTrace):
-            _logger.debug("%r: BYPASS: %r", trace)
+            _logger.debug("%r: BYPASS: %r", self, trace)
             return trace
 
         meta = trace.transfer.metadata
@@ -110,9 +113,9 @@ class RedundantTracer(pyuavcan.transport.Tracer):
             transfer_id=meta.transfer_id,
         )
         if should_accept:
-            _logger.debug("%r: ACCEPT: %r", trace)
+            _logger.debug("%r: ACCEPT: %r", self, trace)
             return trace
-        _logger.debug("%r: REJECT: %r", trace)
+        _logger.debug("%r: REJECT: %r", self, trace)
         return RedundantDuplicateTransferTrace(cap.timestamp)
 
     def _get_deduplicator(
@@ -126,7 +129,7 @@ class RedundantTracer(pyuavcan.transport.Tracer):
             return self._deduplicators[selector]
         except LookupError:
             dd = Deduplicator.new(transfer_id_modulo)
-            _logger.debug("%r: New deduplicator for %r: %r", selector, dd)
+            _logger.debug("%r: New deduplicator for %r: %r", self, selector, dd)
             self._deduplicators[selector] = dd
         return self._deduplicators[selector]
 
@@ -140,7 +143,7 @@ class RedundantTracer(pyuavcan.transport.Tracer):
             return self._inferior_tracers[selector]
         except LookupError:
             it = inferior_type.make_tracer()
-            _logger.debug("%r: New inferior tracer for %r: %r", selector, it)
+            _logger.debug("%r: New inferior tracer for %r: %r", self, selector, it)
             self._inferior_tracers[selector] = it
         return self._inferior_tracers[selector]
 
